@@ -453,6 +453,11 @@ end
 ---@param menuType string Identifier for a menu that has been registered via `AddMenu()`.
 ---@param level number Menu level, 1-3.
 function Menus:LoadMenu(menuType, level)
+	-- On WotLK, UIDropDownMenu_Initialize passes the dropdown frame as the first
+	-- argument to the callback instead of the level number. Guard against this.
+	if type(level) ~= "number" then
+		level = _G.UIDROPDOWNMENU_MENU_LEVEL or 1
+	end
 	level = level or 1
 
 	-- Figure out what menu items to load.

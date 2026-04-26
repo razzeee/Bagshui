@@ -159,15 +159,16 @@ end
 --- Create a new item slot button.
 ---@param name string Unique name for the button (will be passed to `Ui:CreateElementName()`).
 ---@param parent table Parent frame.
+---@param template string? Optional frame template override (defaults to "ItemButtonTemplate").
 ---@return table itemSlotButton
-function Ui:CreateItemSlotButton(name, parent)
+function Ui:CreateItemSlotButton(name, parent, template)
 	assert(name, "CreateItemSlotButton(): name is required")
 
 	local button = _G.CreateFrame(
 		"Button",
 		self:CreateElementName(name),
 		parent,
-		"ItemButtonTemplate"
+		template or "ItemButtonTemplate"
 	)
 
 	button.bagshuiData = {
@@ -247,12 +248,34 @@ function Ui:SkinItemButton(button, buttonType)
 	-- Treat as an item slot button unless the button has been configured as something else.
 	buttonType = buttonInfo.type or BS_UI_ITEM_BUTTON_TYPE.ITEM
 
+	-- On WotLK, the parent frame's backdrop renders above child buttons at the same
+	-- frame level. Raise item slot buttons so icons and borders are visible above
+	-- the window backdrop.
+	button:SetFrameLevel(button:GetFrameLevel() + 5)
+
 	local buttonName = button:GetName()
+
+	-- Locate the icon texture. Named children vary by WoW version and template:
+	-- Retail/WotLK ItemButtonTemplate: <name>IconTexture
+	-- WotLK ContainerFrameItemButtonTemplate: <name>Icon
+	-- Fallback: iterate button regions to find the ARTWORK-layer texture (the icon).
+	local iconTex = _G[buttonName .. "IconTexture"] or _G[buttonName .. "Icon"]
+	if not iconTex then
+		-- Walk all textures on the button looking for the ARTWORK layer, which is
+		-- where ItemButtonTemplate places the item icon on this server.
+		for i = 1, button:GetNumRegions() do
+			local region = select(i, button:GetRegions())
+			if region and region.GetDrawLayer and region:GetDrawLayer() == "ARTWORK" then
+				iconTex = region
+				break
+			end
+		end
+	end
 
 	-- Build a list of all the button parts so they're easily accessible in the future.
 	buttonInfo.buttonComponents = {
 		highlightTexture = button:GetHighlightTexture(),
-		iconTexture = _G[buttonName .. "IconTexture"],
+		iconTexture = iconTex,
 		normalTexture = button:GetNormalTexture(),
 		pushedTexture = button:GetPushedTexture(),
 		checkedTexture = _G[buttonName .. "HighlightFrameTexture"],
@@ -262,12 +285,12 @@ function Ui:SkinItemButton(button, buttonType)
 	local buttonComponents = buttonInfo.buttonComponents
 
 	-- Adjust texture coordinates.
-	if BsSkin.itemSlotIconTexCoord then
+	if BsSkin.itemSlotIconTexCoord and buttonComponents.iconTexture then
 		buttonComponents.iconTexture:SetTexCoord(BsSkin.itemSlotIconTexCoord[1], BsSkin.itemSlotIconTexCoord[2], BsSkin.itemSlotIconTexCoord[3], BsSkin.itemSlotIconTexCoord[4])
 	end
 
 	-- Adjust icon texture anchoring.
-	if BsSkin.itemSlotIconAnchor then
+	if BsSkin.itemSlotIconAnchor and buttonComponents.iconTexture then
 		buttonComponents.iconTexture:ClearAllPoints()
 		buttonComponents.iconTexture:SetPoint("TOPLEFT", BsSkin.itemSlotIconAnchor, -BsSkin.itemSlotIconAnchor)
 		buttonComponents.iconTexture:SetPoint("BOTTOMRIGHT", -BsSkin.itemSlotIconAnchor, BsSkin.itemSlotIconAnchor)
@@ -365,7 +388,7 @@ function Ui:SkinItemButton(button, buttonType)
 	end
 
 	-- Change NormalTexture if the skin wants it.
-	if BsSkin.itemSlotNormalTexture then
+	if BsSkin.itemSlotNormalTexture and buttonComponents.normalTexture then
 		buttonComponents.normalTexture:SetTexture(BsSkin.itemSlotNormalTexture)
 	end
 
@@ -443,8 +466,15 @@ function Ui:AssignItemToItemButton(button, item, groupId)
 	-- Store group ID so `UpdateItemButtonStockState()` can pull per-group settings.
 	buttonInfo.groupId = groupId
 
-	-- Set main item texture.
-	_G.SetItemButtonTexture(button, item.texture)
+	-- Set main item texture directly on the iconTexture component.
+	-- SetItemButtonTexture() looks for <buttonName>Icon but Bagshui names it
+	-- <buttonName>IconTexture, so we set it directly to ensure it works.
+	local iconTex = buttonInfo.buttonComponents and buttonInfo.buttonComponents.iconTexture
+	if iconTex then
+		iconTex:SetTexture(item.texture)
+	else
+		_G.SetItemButtonTexture(button, item.texture)
+	end
 
 	-- Start with full normal color and opacity.
 
@@ -650,7 +680,9 @@ function Ui:AssignItemToItemButton(button, item, groupId)
 			cooldownStart, cooldownDuration, isOnCooldown = _G.GetContainerItemCooldown(item.bagNum, item.slotNum)
 		end
 
-		_G.CooldownFrame_SetTimer(buttonComponents.cooldown, cooldownStart, cooldownDuration, isOnCooldown)
+		-- CooldownFrame_SetTimer may fail on some clients (e.g. missing :Clear method).
+		-- Wrap in pcall to prevent it from breaking item display.
+		pcall(_G.CooldownFrame_SetTimer, buttonComponents.cooldown, cooldownStart, cooldownDuration, isOnCooldown)
 
 		-- Apparently there can be situations where the cooldownDuration is greater than 0,
 		-- but isOnCooldown is false. When that happens, dim the item.
@@ -726,7 +758,9 @@ function Ui:UpdateItemButtonColorsAndBadges(button, force)
 			)
 		then
 			-- We should be highlighting a category or item.
-			buttonComponents.iconTexture:SetVertexColor(1, 1, 1, 1)
+			if buttonComponents.iconTexture then
+				buttonComponents.iconTexture:SetVertexColor(1, 1, 1, 1)
+			end
 			buttonComponents.count:SetAlpha(1)
 
 			buttonComponents.border:SetBackdropBorderColor(
@@ -751,7 +785,9 @@ function Ui:UpdateItemButtonColorsAndBadges(button, force)
 			)
 		else
 			-- Dim this item.
-			buttonComponents.iconTexture:SetVertexColor(1, 1, 1, BsSkin.itemSlotTextureEditModeOpacity)
+			if buttonComponents.iconTexture then
+				buttonComponents.iconTexture:SetVertexColor(1, 1, 1, BsSkin.itemSlotTextureEditModeOpacity)
+			end
 			buttonComponents.count:SetAlpha(0.5)
 			buttonComponents.border:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
 			if buttonComponents.innerGlow then
@@ -821,12 +857,14 @@ function Ui:UpdateItemButtonColorsAndBadges(button, force)
 		end
 
 		-- Set color and opacity of main texture and count.
-		buttonComponents.iconTexture:SetVertexColor(
-			iconTextureColorR,
-			iconTextureColorG,
-			iconTextureColorB,
-			opacityOverride or iconTextureAlpha
-		)
+		if buttonComponents.iconTexture then
+			buttonComponents.iconTexture:SetVertexColor(
+				iconTextureColorR,
+				iconTextureColorG,
+				iconTextureColorB,
+				opacityOverride or iconTextureAlpha
+			)
+		end
 
 		-- Item borders get colors for every quality level.
 		-- Some skins may always need the border displayed if the baked-in ItemTexture

@@ -49,6 +49,7 @@ local GameInfo = {
 	-- Keys: English UPPERCASE names
 	-- Values: English Proper Noun Case names
 	characterClasses = {
+		["DEATHKNIGHT"] = "Death Knight",
 		["DRUID"]   = "Druid",
 		["HUNTER"]  = "Hunter",
 		["MAGE"]    = "Mage",
@@ -74,14 +75,11 @@ local GameInfo = {
 	itemSubclasses = {},
 
 	-- Need these mappings to call GetAuctionItemSubClasses.
-	itemSubClassIds = {
-		Weapon = 1,
-		Armor = 2,
-		Container = 3,
-		Projectile = 6,
-		Quiver = 7,
-		Recipe = 8
-	},
+	-- WotLK changed the order: Consumable(1), Container(2), Weapon(3), Gem(4),
+	-- Armor(5), Reagent(6), Projectile(7), Trade Goods(8), Generic(9), Recipe(10),
+	-- Money(11), Quiver(12), Quest(13), Key(14), Permanent(15), Miscellaneous(16), Glyph(17).
+	-- Vanilla order: Weapon(1), Armor(2), Container(3), ..., Projectile(6), Quiver(7), Recipe(8).
+	itemSubClassIds = {},
 
 	-- List of inventory slot locations, used to generate rule function templates.
 	inventorySlots = {},
@@ -110,71 +108,138 @@ Bagshui.components.GameInfo = GameInfo
 
 
 -- Populate item classes and subclasses.
+-- GetAuctionItemClasses() returns classes in game-version-specific order.
+-- We capture all returned values and build a reverse-lookup to get the 1-based
+-- index for each class name, which is what GetAuctionItemSubClasses() expects.
 
-GameInfo.itemClasses["Weapon"],
-GameInfo.itemClasses["Armor"],
-GameInfo.itemClasses["Container"],
-GameInfo.itemClasses["Consumable"],
-GameInfo.itemClasses["Trade Goods"],
-GameInfo.itemClasses["Projectile"],
-GameInfo.itemClasses["Quiver"],
-GameInfo.itemClasses["Recipe"],
-GameInfo.itemClasses["Reagent"],
-GameInfo.itemClasses["Miscellaneous"] = _G.GetAuctionItemClasses()
+do
+	-- Capture all item class names returned by GetAuctionItemClasses.
+	local classNames = { _G.GetAuctionItemClasses() }
+	for idx, name in ipairs(classNames) do
+		-- Store localized name in itemClasses (keyed by English name).
+		-- We use the localized name as both key and value here; GameInfo.itemClasses
+		-- already seeds English names that aren't returned by GetAuctionItemClasses.
+		GameInfo.itemClasses[name] = name
+		-- Build a map from English-ish name to 1-based index for GetAuctionItemSubClasses.
+		GameInfo.itemSubClassIds[name] = idx
+	end
+
+	-- Known English class names for each expected 1-based index.
+	-- Vanilla:  Weapon=1, Armor=2, Container=3, ..., Projectile=6, Quiver=7, Recipe=8
+	-- WotLK:    Consumable=1, Container=2, Weapon=3, Gem=4, Armor=5, Reagent=6,
+	--           Projectile=7, Trade Goods=8, Generic=9, Recipe=10, Money=11,
+	--           Quiver=12, Quest=13, Key=14, Permanent=15, Miscellaneous=16, Glyph=17
+	-- Build friendly English-keyed aliases so internal code using string keys still works.
+	local englishAliases = {
+		"Weapon", "Armor", "Container", "Consumable", "Trade Goods",
+		"Projectile", "Quiver", "Recipe", "Reagent", "Gem", "Glyph",
+	}
+	for _, alias in ipairs(englishAliases) do
+		if not GameInfo.itemSubClassIds[alias] then
+			-- Try to find it by iterating classNames (English client names match).
+			for idx, name in ipairs(classNames) do
+				if name == alias then
+					GameInfo.itemSubClassIds[alias] = idx
+					break
+				end
+			end
+		end
+	end
+end
 
 for itemClass, localizedItemClass in pairs(GameInfo.itemClasses) do
 	GameInfo.itemSubclasses[itemClass] = {}
 end
 
-GameInfo.itemSubclasses["Weapon"]["One-Handed Axes"],
-GameInfo.itemSubclasses["Weapon"]["Two-Handed Axes"],
-GameInfo.itemSubclasses["Weapon"]["Bows"],
-GameInfo.itemSubclasses["Weapon"]["Guns"],
-GameInfo.itemSubclasses["Weapon"]["One-Handed Maces"],
-GameInfo.itemSubclasses["Weapon"]["Two-Handed Maces"],
-GameInfo.itemSubclasses["Weapon"]["Polearms"],
-GameInfo.itemSubclasses["Weapon"]["One-Handed Swords"],
-GameInfo.itemSubclasses["Weapon"]["Two-Handed Swords"],
-GameInfo.itemSubclasses["Weapon"]["Staves"],
-GameInfo.itemSubclasses["Weapon"]["Fist Weapons"],
-GameInfo.itemSubclasses["Weapon"]["Miscellaneous"],
-GameInfo.itemSubclasses["Weapon"]["Daggers"],
-GameInfo.itemSubclasses["Weapon"]["Thrown"],
-GameInfo.itemSubclasses["Weapon"]["Crossbows"],
-GameInfo.itemSubclasses["Weapon"]["Wands"],
-GameInfo.itemSubclasses["Weapon"]["Fishing Pole"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Weapon)
+-- Weapon subclasses (same in Vanilla and WotLK).
+if GameInfo.itemSubClassIds["Weapon"] then
+	GameInfo.itemSubclasses["Weapon"]["One-Handed Axes"],
+	GameInfo.itemSubclasses["Weapon"]["Two-Handed Axes"],
+	GameInfo.itemSubclasses["Weapon"]["Bows"],
+	GameInfo.itemSubclasses["Weapon"]["Guns"],
+	GameInfo.itemSubclasses["Weapon"]["One-Handed Maces"],
+	GameInfo.itemSubclasses["Weapon"]["Two-Handed Maces"],
+	GameInfo.itemSubclasses["Weapon"]["Polearms"],
+	GameInfo.itemSubclasses["Weapon"]["One-Handed Swords"],
+	GameInfo.itemSubclasses["Weapon"]["Two-Handed Swords"],
+	GameInfo.itemSubclasses["Weapon"]["Staves"],
+	GameInfo.itemSubclasses["Weapon"]["Fist Weapons"],
+	GameInfo.itemSubclasses["Weapon"]["Miscellaneous"],
+	GameInfo.itemSubclasses["Weapon"]["Daggers"],
+	GameInfo.itemSubclasses["Weapon"]["Thrown"],
+	GameInfo.itemSubclasses["Weapon"]["Crossbows"],
+	GameInfo.itemSubclasses["Weapon"]["Wands"],
+	GameInfo.itemSubclasses["Weapon"]["Fishing Pole"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Weapon"])
+end
 
-GameInfo.itemSubclasses["Armor"]["Miscellaneous"],
-GameInfo.itemSubclasses["Armor"]["Cloth"],
-GameInfo.itemSubclasses["Armor"]["Leather"],
-GameInfo.itemSubclasses["Armor"]["Mail"],
-GameInfo.itemSubclasses["Armor"]["Plate"],
-GameInfo.itemSubclasses["Armor"]["Shields"],
-GameInfo.itemSubclasses["Armor"]["Librams"],
-GameInfo.itemSubclasses["Armor"]["Idols"],
-GameInfo.itemSubclasses["Armor"]["Totems"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Armor)
+-- Armor subclasses: WotLK replaces Librams/Idols/Totems with Sigils for Death Knight
+-- and keeps the rest the same; we query dynamically to get localized names.
+if GameInfo.itemSubClassIds["Armor"] then
+	GameInfo.itemSubclasses["Armor"]["Miscellaneous"],
+	GameInfo.itemSubclasses["Armor"]["Cloth"],
+	GameInfo.itemSubclasses["Armor"]["Leather"],
+	GameInfo.itemSubclasses["Armor"]["Mail"],
+	GameInfo.itemSubclasses["Armor"]["Plate"],
+	GameInfo.itemSubclasses["Armor"]["Shields"],
+	GameInfo.itemSubclasses["Armor"]["Librams"],
+	GameInfo.itemSubclasses["Armor"]["Idols"],
+	GameInfo.itemSubclasses["Armor"]["Totems"],
+	GameInfo.itemSubclasses["Armor"]["Sigils"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Armor"])
+end
 
-GameInfo.itemSubclasses["Container"]["Bag"],
-GameInfo.itemSubclasses["Container"]["Soul Bag"],
-GameInfo.itemSubclasses["Container"]["Herb Bag"],
-GameInfo.itemSubclasses["Container"]["Enchanting Bag"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Container)
+-- Container subclasses: WotLK adds Mining Bag, Engineering Bag, Gem Bag, Fishing Bag, Jewelcrafting Bag.
+if GameInfo.itemSubClassIds["Container"] then
+	GameInfo.itemSubclasses["Container"]["Bag"],
+	GameInfo.itemSubclasses["Container"]["Soul Bag"],
+	GameInfo.itemSubclasses["Container"]["Herb Bag"],
+	GameInfo.itemSubclasses["Container"]["Enchanting Bag"],
+	GameInfo.itemSubclasses["Container"]["Engineering Bag"],
+	GameInfo.itemSubclasses["Container"]["Gem Bag"],
+	GameInfo.itemSubclasses["Container"]["Mining Bag"],
+	GameInfo.itemSubclasses["Container"]["Leatherworking Bag"],
+	GameInfo.itemSubclasses["Container"]["Inscription Bag"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Container"])
+end
 
-GameInfo.itemSubclasses["Projectile"]["Arrow"],
-GameInfo.itemSubclasses["Projectile"]["Bullet"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Projectile)
+if GameInfo.itemSubClassIds["Projectile"] then
+	GameInfo.itemSubclasses["Projectile"]["Arrow"],
+	GameInfo.itemSubclasses["Projectile"]["Bullet"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Projectile"])
+end
 
-GameInfo.itemSubclasses["Quiver"]["Quiver"],
-GameInfo.itemSubclasses["Quiver"]["Ammo Pouch"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Quiver)
+if GameInfo.itemSubClassIds["Quiver"] then
+	GameInfo.itemSubclasses["Quiver"]["Quiver"],
+	GameInfo.itemSubclasses["Quiver"]["Ammo Pouch"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Quiver"])
+end
 
-GameInfo.itemSubclasses["Recipe"]["Book"],
-GameInfo.itemSubclasses["Recipe"]["Leatherworking"],
-GameInfo.itemSubclasses["Recipe"]["Tailoring"],
-GameInfo.itemSubclasses["Recipe"]["Engineering"],
-GameInfo.itemSubclasses["Recipe"]["Blacksmithing"],
-GameInfo.itemSubclasses["Recipe"]["Cooking"],
-GameInfo.itemSubclasses["Recipe"]["Alchemy"],
-GameInfo.itemSubclasses["Recipe"]["First Aid"],
-GameInfo.itemSubclasses["Recipe"]["Enchanting"],
-GameInfo.itemSubclasses["Recipe"]["Fishing"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds.Recipe)
+-- Recipe subclasses: WotLK adds Jewelcrafting, Inscription.
+if GameInfo.itemSubClassIds["Recipe"] then
+	GameInfo.itemSubclasses["Recipe"]["Book"],
+	GameInfo.itemSubclasses["Recipe"]["Leatherworking"],
+	GameInfo.itemSubclasses["Recipe"]["Tailoring"],
+	GameInfo.itemSubclasses["Recipe"]["Engineering"],
+	GameInfo.itemSubclasses["Recipe"]["Blacksmithing"],
+	GameInfo.itemSubclasses["Recipe"]["Cooking"],
+	GameInfo.itemSubclasses["Recipe"]["Alchemy"],
+	GameInfo.itemSubclasses["Recipe"]["First Aid"],
+	GameInfo.itemSubclasses["Recipe"]["Enchanting"],
+	GameInfo.itemSubclasses["Recipe"]["Fishing"],
+	GameInfo.itemSubclasses["Recipe"]["Jewelcrafting"],
+	GameInfo.itemSubclasses["Recipe"]["Inscription"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Recipe"])
+end
+
+-- Glyph class (WotLK new).
+if GameInfo.itemSubClassIds["Glyph"] then
+	GameInfo.itemSubclasses["Glyph"] = GameInfo.itemSubclasses["Glyph"] or {}
+	GameInfo.itemSubclasses["Glyph"]["Warrior"],
+	GameInfo.itemSubclasses["Glyph"]["Paladin"],
+	GameInfo.itemSubclasses["Glyph"]["Hunter"],
+	GameInfo.itemSubclasses["Glyph"]["Rogue"],
+	GameInfo.itemSubclasses["Glyph"]["Priest"],
+	GameInfo.itemSubclasses["Glyph"]["Death Knight"],
+	GameInfo.itemSubclasses["Glyph"]["Shaman"],
+	GameInfo.itemSubclasses["Glyph"]["Mage"],
+	GameInfo.itemSubclasses["Glyph"]["Warlock"],
+	GameInfo.itemSubclasses["Glyph"]["Druid"] = _G.GetAuctionItemSubClasses(GameInfo.itemSubClassIds["Glyph"])
+end
 
 
 -- Item subclasses not provided by GetAuctionItemClasses which need to be localized manually in the locale file.

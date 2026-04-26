@@ -426,7 +426,10 @@ function Inventory:MoveItem(source, target, onComplete)
 		_G.PickupContainerItem(target.bagNum, target.slotNum)
 	elseif type(target) == "number" then
 		-- This is an item being equipped to a slot.
-		_G.EquipCursorItem(_G.ContainerIDToInventoryID(target))
+		local ok, inventoryId = pcall(_G.ContainerIDToInventoryID, target)
+		if ok then
+			_G.EquipCursorItem(inventoryId)
+		end
 		-- Might be BOE, so pass callback responsibilities over.
 		-- (Could check for BOE but there's really no reason to do so when
 		-- WaitForStaticPopupClose() will just invoke the callback immediately
@@ -853,7 +856,8 @@ function Inventory:UIErrorsFrame_OnEvent(wowApiFunctionName, event, message)
 
 		-- Find the slot into which it should be put.
 		for _, containerId in ipairs(self.containerIds) do
-			if _G.IsInventoryItemLocked(_G.ContainerIDToInventoryID(containerId)) then
+			local ok, inventoryId = pcall(_G.ContainerIDToInventoryID, containerId)
+			if ok and _G.IsInventoryItemLocked(inventoryId) then
 				bagSlot = containerId
 			end
 		end

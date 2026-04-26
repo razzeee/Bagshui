@@ -122,15 +122,19 @@ function Inventory:UpdateCache()
 			bagType = self.primaryContainer.name
 		else
 			bagName = _G.GetBagName(bagNum)
-			bagSlotLink = _G.GetInventoryItemLink("player", _G.ContainerIDToInventoryID(bagNum))
-			if bagSlotLink ~= nil then
-				_, _, bagItemCode = string.find(bagSlotLink, "(%d+):")
-				_, _, _, _, _, bagType, _, _, bagTexture = _G.GetItemInfo(bagItemCode)
+			local inventoryIdOk, inventoryId = pcall(_G.ContainerIDToInventoryID, bagNum)
+			if inventoryIdOk then
+				bagSlotLink = _G.GetInventoryItemLink("player", inventoryId)
+				if bagSlotLink ~= nil then
+					_, _, bagItemCode = string.find(bagSlotLink, "(%d+):")
+					_, _, _, _, _, bagType, _, _, bagTexture = _G.GetItemInfo(bagItemCode)
+				end
 			end
 		end
 
 		-- Keep track of whether this bag got locked to help coordinate bag change updates after it's unlocked.
-		self.lastUpdateLockedContainers[bagNum] = _G.IsInventoryItemLocked(_G.ContainerIDToInventoryID(bagNum))
+		local lockedIdOk, lockedInventoryId = pcall(_G.ContainerIDToInventoryID, bagNum)
+		self.lastUpdateLockedContainers[bagNum] = lockedIdOk and _G.IsInventoryItemLocked(lockedInventoryId) or false
 
 		-- No reason to store full texture paths since they're always in Interface\Icons.
 		bagTexture = bagTexture
@@ -270,112 +274,109 @@ function Inventory:UpdateCache()
 
 
 					-- Populate basic item information.
-					if
-						not BsItemInfo:Get(
-							nowItemLink,  -- itemIdentifier
-							item,  -- itemInfoTable
-							false,  -- initialize
-							(preItemLink ~= nowItemLink),  -- reinitialize
-							false,  -- forceIntoLocalGameCache
-							self  -- Inventory class instance
-						)
-					then
-						-- If GetItemInfo() returns nil, ItemInfo:Get() will return false. When this occurs,
-						-- bail and rely on cached inventory data until the next update attempt. This should only
-						-- happen during the first second or two after login, so we do delay the initial inventory
-						-- cache update to attempt to account for this. However, it's still safest to keep the
-						-- check in place.
-
-						-- Add a flag to this item's cache entry so we know that it absolutely has to be refreshed
-						-- next time around.
+					-- If GetItemInfo() returns nil, ItemInfo:Get() returns false. Flag the slot
+					-- for retry and skip the rest of this slot's processing (but continue with
+					-- other slots). Previously this did a hard return from UpdateCache() entirely.
+					local itemInfoOk = BsItemInfo:Get(
+						nowItemLink,  -- itemIdentifier
+						item,  -- itemInfoTable
+						false,  -- initialize
+						(preItemLink ~= nowItemLink),  -- reinitialize
+						false,  -- forceIntoLocalGameCache
+						self  -- Inventory class instance
+					)
+					if not itemInfoOk then
+						-- Restore item state to what it was before this update attempt so
+						-- that subsequent change-detection comparisons (charges, etc.) don't
+						-- see spurious differences and trigger unnecessary redraws.
 						item._getItemInfoFailed = true
-						return
-					end
-
-
-					-- Need to store different data for filled vs. empty slots.
-					if item.itemString ~= nil then
-						-- Slot contains an item.
-						item.count = nowCount
-						item.locked = nowLocked or BS_ITEM_SKELETON.locked
-						item.readable = itemReadable or BS_ITEM_SKELETON.readable
-						-- We got charges from GetContainerItemInfo() and need to restore
-						-- because ItemInfo:Get() might have wiped them.
-						if nowCharges > 0 then
-							item.charges = nowCharges
-						end
-
+						item.charges = preCharges
 					else
-						-- Slot is empty.
-						BsItemInfo:InitializeEmptySlotItem(item)
-						if self.containers[bagNum].isProfessionBag then
-							item.name = item.bagType .. " " .. item.name
-						end
 
-						-- Slot has just become empty - don't allow it to collapse back
-						-- into the stack until re-sorting occurs.
-						if preItemLink ~= nowItemLink then
-							item._bagshuiPreventEmptySlotStack = true
-						end
-
-						-- Add to empty slot tracking table.
-						-- See `Inventory:SwapBag()` comments regarding the exclusion of profession bags.
-						if bagInfo.genericType == BsGameInfo.itemSubclasses["Container"]["Bag"] then
-							table.insert(self.emptyGenericContainerSlots, item)
-						end
-					end
-
-					-- Check for stock state changes.
-					if
-						item.itemString ~= nil
-						and not self.freshCache
-						-- Nothing has actually changed if the item was just picked up and put back down.
-						and Bagshui.lastCursorItemUniqueId ~= BsItemInfo:GetUniqueItemId(item)
-					then
-
-						if
-							item.itemString ~= preItemString
-							and item.bagshuiDate == -1
-						then
-							-- Item itself has changed, so flag it as new.
-							item._proposedStockState = BS_ITEM_STOCK_STATE.NEW
-							item._proposedDate = _G.time()
-
-							-- Enable resorting because an item DID change.
-							-- Even if the stock state change isn't approved, resort may be needed.
-							majorChanges = true
-
-						elseif
-							item.itemString == preItemString
-							and item.count ~= preCount
-							and preCount ~= -1
-						then
-							-- Item has not changed, but count did, so stock state needs to be updated.
-							if item.count > preCount then
-								item._proposedStockState = BS_ITEM_STOCK_STATE.UP
-							else
-								item._proposedStockState = BS_ITEM_STOCK_STATE.DOWN
+						-- Need to store different data for filled vs. empty slots.
+						if item.itemString ~= nil then
+							-- Slot contains an item.
+							item.count = nowCount
+							item.locked = nowLocked or BS_ITEM_SKELETON.locked
+							item.readable = itemReadable or BS_ITEM_SKELETON.readable
+							-- We got charges from GetContainerItemInfo() and need to restore
+							-- because ItemInfo:Get() might have wiped them.
+							if nowCharges > 0 then
+								item.charges = nowCharges
 							end
-							item._proposedDate = _G.time()
 
-							-- Also enable resorting since count is usually a sort property.
-							-- This isn't dependent on the stock change being approved since the item
-							-- slot count DID change, which can require a resort.
-							majorChanges = true
+						else
+							-- Slot is empty.
+							BsItemInfo:InitializeEmptySlotItem(item)
+							if self.containers[bagNum].isProfessionBag then
+								item.name = item.bagType .. " " .. item.name
+							end
 
-						elseif
-							self.initialInventoryUpdateNeeded
-							and Bagshui.currentCharacterData.lastLogout
-							and (item.bagshuiDate or 0) > 0
+							-- Slot has just become empty - don't allow it to collapse back
+							-- into the stack until re-sorting occurs.
+							if preItemLink ~= nowItemLink then
+								item._bagshuiPreventEmptySlotStack = true
+							end
+
+							-- Add to empty slot tracking table.
+							-- See `Inventory:SwapBag()` comments regarding the exclusion of profession bags.
+							if bagInfo.genericType == BsGameInfo.itemSubclasses["Container"]["Bag"] then
+								table.insert(self.emptyGenericContainerSlots, item)
+							end
+						end
+
+						-- Check for stock state changes.
+						if
+							item.itemString ~= nil
+							and not self.freshCache
+							-- Nothing has actually changed if the item was just picked up and put back down.
+							and Bagshui.lastCursorItemUniqueId ~= BsItemInfo:GetUniqueItemId(item)
 						then
-							-- Just logged in, so move item dates forward by the amount of time since this
-							-- character last logged out. This makes it so that only in-game time is counted.
-							item.bagshuiDate = item.bagshuiDate + (_G.time() - Bagshui.currentCharacterData.lastLogout)
+
+							if
+								item.itemString ~= preItemString
+								and item.bagshuiDate == -1
+							then
+								-- Item itself has changed, so flag it as new.
+								item._proposedStockState = BS_ITEM_STOCK_STATE.NEW
+								item._proposedDate = _G.time()
+
+								-- Enable resorting because an item DID change.
+								-- Even if the stock state change isn't approved, resort may be needed.
+								majorChanges = true
+
+							elseif
+								item.itemString == preItemString
+								and item.count ~= preCount
+								and preCount ~= -1
+							then
+								-- Item has not changed, but count did, so stock state needs to be updated.
+								if item.count > preCount then
+									item._proposedStockState = BS_ITEM_STOCK_STATE.UP
+								else
+									item._proposedStockState = BS_ITEM_STOCK_STATE.DOWN
+								end
+								item._proposedDate = _G.time()
+
+								-- Also enable resorting since count is usually a sort property.
+								-- This isn't dependent on the stock change being approved since the item
+								-- slot count DID change, which can require a resort.
+								majorChanges = true
+
+							elseif
+								self.initialInventoryUpdateNeeded
+								and Bagshui.currentCharacterData.lastLogout
+								and (item.bagshuiDate or 0) > 0
+							then
+								-- Just logged in, so move item dates forward by the amount of time since this
+								-- character last logged out. This makes it so that only in-game time is counted.
+								item.bagshuiDate = item.bagshuiDate + (_G.time() - Bagshui.currentCharacterData.lastLogout)
+
+							end
 
 						end
 
-					end
-
+					end  -- if itemInfoOk (BsItemInfo:Get() succeeded)
 
 				elseif
 					not BS_SUPER_WOW_LOADED
@@ -389,10 +390,10 @@ function Inventory:UpdateCache()
 					-- (Normally the call to GetTooltip() happens automatically within ItemInfo:Get().)
 					BsItemInfo:GetTooltip(item, self)
 
-				end  -- Item changes check.
+				end  -- if changes / elseif charges changed
 
 
-				-- When charges has changed, a re-sort is probably needed.
+			-- When charges has changed, a re-sort is probably needed.
 				-- This check is here so that it works for both SuperWoW and native charges parsing.
 				if item.charges ~= preCharges then
 					majorChanges = true
@@ -456,7 +457,9 @@ function Inventory:UpdateCache()
 
 
 				-- Item isn't assigned to a group, so resort is required.
-				if item.bagshuiGroupId == "" then
+				-- Only check this when item info was successfully loaded; if GetItemInfo()
+				-- failed, bagshuiGroupId is still "" but will be set once it succeeds.
+				if itemInfoOk and item.bagshuiGroupId == "" then
 					majorChanges = true
 				end
 
@@ -488,9 +491,9 @@ function Inventory:UpdateCache()
 						self.postUpdateItemCounts[item.itemString] = 0
 					end
 					self.postUpdateItemCounts[item.itemString] = self.postUpdateItemCounts[item.itemString] + item.count
-				end
+			end
 
-			end  -- Item slot loop within each bag.
+		end  -- Item slot loop within each bag.
 
 
 		else

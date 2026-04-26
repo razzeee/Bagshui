@@ -16,13 +16,43 @@ Bagshui:LoadComponent(function()
 --- ```
 ---@param wowApiFunctionName string Hooked WoW API function that triggered this call. 
 function Bagshui:MoneyFrame_UpdateMoney(wowApiFunctionName)
+	-- Guard against _G.this being nil (can happen in non-1.12-style OnLoad/OnShow
+	-- contexts such as ElvUI's static popup construction).
+	if not _G.this then
+		return
+	end
 	-- There doesn't seem to be anything that initializes the `staticMoney` property
 	-- of money frames, but this is only a problem sometimes? It's confusing.
 	-- Regardless, this prevents the error from happening.
 	if _G.this.moneyType == "STATIC" and _G.this.staticMoney == nil then
 		_G.this.staticMoney = 0
 	end
-	self.hooks:OriginalHook(wowApiFunctionName)
+	-- The original function asserts that a named child frame exists. This can fail
+	-- intermittently during frame construction (e.g. OnShow firing before children
+	-- are ready). Swallow the error silently -- the frame will update correctly
+	-- once it is fully initialized.
+	pcall(self.hooks.OriginalHook, self.hooks, wowApiFunctionName)
+end
+
+
+
+--- Guard against `MoneyFrame_SetType` being called without a valid moneyType string.
+--- ElvUI constructs SmallMoneyFrames using the WotLK calling convention
+--- MoneyFrame_SetType(frame, moneyType), passing the frame as arg1 and moneyType as arg2.
+--- When moneyType is nil (SmallMoneyFrame_OnLoad passes none), skip the call entirely.
+---@param wowApiFunctionName string Hooked WoW API function that triggered this call.
+---@param arg1 any Frame (WotLK style) or moneyType string (1.12 style).
+---@param arg2 any moneyType string (WotLK style) or nil (1.12 style).
+function Bagshui:MoneyFrame_SetType(wowApiFunctionName, arg1, arg2)
+	-- WotLK style: arg1=frame, arg2=moneyType. 1.12 style: arg1=moneyType.
+	local moneyType = arg2 ~= nil and arg2 or arg1
+	-- Pass through if arg1 is a frame (WotLK SmallMoneyFrame_OnLoad calls MoneyFrame_SetType(frame)
+	-- with no moneyType; WotLK's original defaults to "PLAYER" and we must not block that).
+	-- Only block calls where moneyType is nil AND arg1 is not a frame object.
+	if (moneyType == nil or type(moneyType) ~= "string") and type(arg1) ~= "table" then
+		return
+	end
+	self.hooks:OriginalHook(wowApiFunctionName, arg1, arg2)
 end
 
 

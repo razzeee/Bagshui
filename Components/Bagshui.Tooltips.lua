@@ -49,10 +49,10 @@ function Bagshui:InitTooltips()
 	-- the non-title text doesn't become unreadable.
 	local _, titleFontSize = _G[iconButtonTooltipName .. "TextLeft1"]:GetFont()
 	for i = 2, 10 do
-		_G[iconButtonTooltipName .. "TextLeft" .. i]:SetFont(
-			_G[iconButtonTooltipName .. "TextLeft" .. i]:GetFont(),
-			titleFontSize
-		)
+		local fontString = _G[iconButtonTooltipName .. "TextLeft" .. i]
+		if fontString then
+			fontString:SetFont(fontString:GetFont(), titleFontSize)
+		end
 	end
 	self.tooltips.iconButton:SetScale(0.65)
 

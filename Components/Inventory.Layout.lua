@@ -1184,10 +1184,18 @@ function Inventory:UpdateWindow()
 
 		else
 			-- Set scale and anchor for non-docked frame.
-			self.uiFrame:SetScale(self.settings.windowScale)
-			-- Ensure the window stays in the right place as it resizes.
-			-- WoW will change the anchor point to TOPLEFT when the frame is dragged, so we need to reset it.
-			self:FixWindowPosition()
+			-- Guard against redundant SetScale calls -- on WotLK, SetScale can cause
+			-- sub-pixel layout recalculation even when the value hasn't changed.
+			if self.uiFrame:GetScale() ~= self.settings.windowScale then
+				-- SetScale resets the internal anchor to TOPLEFT on WotLK, so mark
+				-- anchorDirty so FixWindowPosition re-applies the saved anchor below.
+				self.anchorDirty = true
+				self.uiFrame:SetScale(self.settings.windowScale)
+			end
+			-- Re-apply saved anchor only when dirty (after SetScale or drag).
+			-- Pass true to skip RescueWindow: the frame is mid-layout and GetLeft()/GetRight()
+			-- may not yet reflect the final position, which would cause a false rescue.
+			self:FixWindowPosition(true)
 		end
 	end
 
@@ -1306,10 +1314,6 @@ function Inventory:AssignItemsToSlots(
 				self.ui:CreateInventoryItemSlotButton(currentItemSlotButtonNum)
 
 				button = buttons.itemSlots[currentItemSlotButtonNum]
-
-				-- Ensure parentage of item slot button is set to current group frame.
-				-- This is required to get the layering right -- without it, stuff can end up behind groups.
-				button:SetParent(groupFrame)
 
 				-- Record details of this button's assignments so we can access
 				-- them during UI events.
@@ -2129,6 +2133,11 @@ function Inventory:UpdateToolbar()
 		for _, text in pairs(self.ui.frames.money.bagshuiData.texts) do
 			text:SetTextColor(self.settings.groupLabelDefault[1], self.settings.groupLabelDefault[2], self.settings.groupLabelDefault[3], self.settings.groupLabelDefault[4])
 		end
+		-- Force money frame update every toolbar refresh so its width is correct
+		-- before UpdateToolbarAnchoring() chains button positions off it.
+		if _G.MoneyFrame_Update then
+			pcall(_G.MoneyFrame_Update, self.ui.frames.money)
+		end
 	else
 		self.ui.frames.money:Hide()
 	end
@@ -2174,6 +2183,7 @@ function Inventory:UpdateToolbar()
 		toolbarButtons.disenchant,
 		(
 			self.disenchantButton
+			and toolbarButtons.disenchant
 			and BsCharacter.spellNamesToIds[toolbarButtons.disenchant.bagshuiData.spellName]
 			and self.settings.showDisenchant
 			or false
@@ -2186,6 +2196,7 @@ function Inventory:UpdateToolbar()
 		toolbarButtons.pickLock,
 		(
 			self.pickLockButton
+			and toolbarButtons.pickLock
 			and BsCharacter.spellNamesToIds[toolbarButtons.pickLock.bagshuiData.spellName]
 			and self.settings.showPickLock
 			or false
@@ -2253,6 +2264,7 @@ function Inventory:SetToolbarButtonState(
 	lockedHighlightTooltip,
 	unlockedHighlightTooltip
 )
+	if not button then return end
 
 	if visible == nil then
 		visible = true
@@ -2350,7 +2362,7 @@ end
 --- where we manually hide tooltips and need to make them reappear when something is put back down.
 function Inventory:ItemSlotAndGroupMouseOverCheck()
 	local mouseOverFound = false
-	for _, button in self.ui.buttons.itemSlots do
+	for _, button in pairs(self.ui.buttons.itemSlots) do
 		-- The IsVisible() check is needed because item slot frames that are hidden will still return true for MouseIsOver().
 		if _G.MouseIsOver(button) and button:IsVisible() then
 			self:ItemButton_OnEnter(button)

@@ -49,9 +49,9 @@ function Bags:BagSlotButton_Init(bagSlotButton)
 	local oldOnClick = bagSlotButton:GetScript("OnClick")
 	--- If there was an item in the cursor when the slot was clicked, catch it and prevent the original
 	--- from being called, since since PaperDollItemSlotButton will interpret that as trying to *equip*
-	--- the item in that slot, instead of trying to put it in the bag. Note that due to the behavior of
-	--- `PutItemInBag()`, this will *not* intercept bags, but that's handled in the bag slot button's OnClick.
-	bagSlotButton:SetScript("OnClick", function()
+	--- the item in that slot, instead of trying to put it in the bag. Note that bags in the cursor are
+	--- passed through so native bag swapping can be invoked.
+	bagSlotButton:SetScript("OnClick", function(self)
 		if
 			-- Pass through to the default Bagshui OnClick for bags
 			-- so native bag swapping can be invoked.
@@ -59,10 +59,13 @@ function Bags:BagSlotButton_Init(bagSlotButton)
 				_G.CursorHasItem()
 				and BsItemInfo:IsContainer(Bagshui.cursorItem)
 			)
-			-- Otherwise, allow PutItemInBag() to catch cursor items and move them.
-			or not _G.PutItemInBag(_G.this.bagshuiData.inventorySlotId)
 		then
-			oldOnClick()
+			oldOnClick(self)
+		elseif _G.CursorHasItem() and not BsItemInfo:IsContainer(Bagshui.cursorItem) then
+			-- Place cursor item into the bag slot (WotLK: PutItemInBag removed, use PickupInventoryItem).
+			_G.PickupInventoryItem(self.bagshuiData.inventorySlotId)
+		else
+			oldOnClick(self)
 		end
 	end)
 end

@@ -3,6 +3,13 @@
 
 Bagshui:AddComponent(function()
 
+-- Locale strings for time durations. Some servers/clients may not provide these globals
+-- so fall back to plain English format strings.
+local _durationMin   = _G.INT_SPELL_DURATION_MIN    or "%d min"
+local _durationHour  = _G.INT_SPELL_DURATION_HOURS  or "%d hr"
+local _durationHours = _G.INT_SPELL_DURATION_HOURS_P1 or "%d hrs"
+local _durationDays  = _G.INT_SPELL_DURATION_DAYS   or "%d days"
+
 -- There are some things that need to be defined before we can get to the actual configuration.
 -- If you're just looking for that, skip down to Bagshui.config.Settings.
 
@@ -1206,47 +1213,47 @@ Bagshui.config.Settings = {
 						},
 						{
 							value = 15,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 15)
+							text = string.format(_durationMin, 15)
 						},
 						{
 							value = 30,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 30)
+							text = string.format(_durationMin, 30)
 						},
 						{
 							value = 45,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 45)
+							text = string.format(_durationMin, 45)
 						},
 						{
 							value = 60,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS, 1)
+							text = string.format(_durationHour, 1)
 						},
 						{
 							value = 120,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 2)
+							text = string.format(_durationHours, 2)
 						},
 						{
 							value = 180,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 3)
+							text = string.format(_durationHours, 3)
 						},
 						{
 							value = 240,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 4)
+							text = string.format(_durationHours, 4)
 						},
 						{
 							value = 300,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 5)
+							text = string.format(_durationHours, 5)
 						},
 						{
 							value = 360,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 6)
+							text = string.format(_durationHours, 6)
 						},
 						{
 							value = 720,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 12)
+							text = string.format(_durationHours, 12)
 						},
 						{
 							value = 1440,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 24)
+							text = string.format(_durationHours, 24)
 						},
 					},
 					onChange = function(settings, settingName, newValue)
@@ -1277,47 +1284,47 @@ Bagshui.config.Settings = {
 					choices = {
 						{
 							value = 15,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 15)
+							text = string.format(_durationMin, 15)
 						},
 						{
 							value = 30,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 30)
+							text = string.format(_durationMin, 30)
 						},
 						{
 							value = 45,
-							text = string.format(_G.INT_SPELL_DURATION_MIN, 45)
+							text = string.format(_durationMin, 45)
 						},
 						{
 							value = 60,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS, 1)
+							text = string.format(_durationHour, 1)
 						},
 						{
 							value = 120,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 2)
+							text = string.format(_durationHours, 2)
 						},
 						{
 							value = 360,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 6)
+							text = string.format(_durationHours, 6)
 						},
 						{
 							value = 720,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 12)
+							text = string.format(_durationHours, 12)
 						},
 						{
 							value = 1440,
-							text = string.format(_G.INT_SPELL_DURATION_HOURS_P1, 24)
+							text = string.format(_durationHours, 24)
 						},
 						{
 							value = 2880,
-							text = string.format(_G.INT_SPELL_DURATION_DAYS, 2)
+							text = string.format(_durationDays, 2)
 						},
 						{
 							value = 4320,
-							text = string.format(_G.INT_SPELL_DURATION_DAYS, 3)
+							text = string.format(_durationDays, 3)
 						},
 						{
 							value = 10080,
-							text = string.format(_G.INT_SPELL_DURATION_DAYS, 7)
+							text = string.format(_durationDays, 7)
 						}
 					},
 					inventoryWindowUpdateOnChange = true,

@@ -24,7 +24,7 @@ local CHARACTER_EVENTS = {
 	BAGSHUI_INITIAL_CHARACTER_UPDATE = true,  -- Delayed processing at startup.
 	CHAT_MSG_SKILL = true,  -- New skills learned or leveled up.
 	CHAT_MSG_SYSTEM = true,  -- Messages to parse for important events.
-	CRAFT_SHOW = true,  -- Enchanting profession window is opened.
+	CRAFT_SHOW = _G.GetNumCrafts ~= nil,  -- Enchanting profession window is opened (Vanilla only; WotLK uses TRADE_SKILL_SHOW for all professions).
 	PLAYER_ENTERING_WORLD = true,  -- Trigger initial processing at startup.
 	PLAYER_LEVEL_UP = true,  -- Level up.
 	SKILL_LINES_CHANGED = true,  -- Need to update skills (needed to catch some weird skills like Fist Weapons).
@@ -330,11 +330,13 @@ function Character:UpdateSkillsAndSpells()
 		BsUtil.TableClear(skillTypeList)
 	end
 
-	-- To get the full list of spells, we have to just keep asking GetSpellName
-	-- for spells, starting at 1, until it stops answering.
+	-- To get the full list of spells, we have to just keep asking for spells,
+	-- starting at 1, until it stops answering.
+	-- WotLK renamed GetSpellName(slot, bookType) to GetSpellBookItemName(slot, bookType).
+	local getSpellBookItemName = _G.GetSpellBookItemName or _G.GetSpellName
 	local spellNum = 1
 	while true do
-		local spellName, spellRank = _G.GetSpellName(spellNum, _G.BOOKTYPE_SPELL)
+		local spellName, spellRank = getSpellBookItemName(spellNum, _G.BOOKTYPE_SPELL)
 		if not spellName then
 			break
 		end
@@ -500,9 +502,10 @@ function Character:UpdateProfessionItems(event)
 	local getSkillNumReagents = _G.GetTradeSkillNumReagents
 	local getSkillReagentItemLink = _G.GetTradeSkillReagentItemLink
 
-	-- Enchanting has its own set of functions, and it's the only profession
-	-- referred to as a "Craft" instead of a "TradeSkill".
-	if event == "CRAFT_SHOW" then
+	-- Enchanting has its own set of functions in Vanilla (1.12), and it's the only profession
+	-- referred to as a "Craft" instead of a "TradeSkill". In WotLK+, Enchanting uses the
+	-- standard TradeSkill API, so we only use the Craft path if those functions exist.
+	if event == "CRAFT_SHOW" and _G.GetCraftDisplaySkillLine then
 		getSkillLine = _G.GetCraftDisplaySkillLine
 		getNumSkills = _G.GetNumCrafts
 		getSkillItemLink = _G.GetCraftItemLink
@@ -599,7 +602,7 @@ end
 ---@return string craftType "header" or difficulty of crafting.
 function Character:GetSkillInfo(event, skillNum)
 	local craftName, craftType
-	if event == "CRAFT_SHOW" then
+	if event == "CRAFT_SHOW" and _G.GetCraftInfo then
 		craftName, _, craftType = _G.GetCraftInfo(skillNum)
 	else
 		craftName, craftType = _G.GetTradeSkillInfo(skillNum)

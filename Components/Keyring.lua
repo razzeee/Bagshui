@@ -1,6 +1,9 @@
 -- Bagshui Keyring Inventory Class Instance
 -- Exposes: Bagshui.components.Bags [via Inventory:New()]
 
+-- Keyring was removed in WotLK 3.0; skip loading if the API doesn't exist.
+if not _G.GetKeyRingSize then return end
+
 Bagshui:AddComponent(function()
 
 

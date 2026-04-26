@@ -136,6 +136,7 @@ function ItemInfo:Get(itemIdentifier, itemInfoTable, reinitialize, initialize, f
 		itemName,
 			itemStringFromGetItemInfo,
 			itemQuality,
+			_,  -- itemLevel (WotLK added this as return value 4; not used by Bagshui)
 			itemMinLevel,
 			itemType,
 			itemSubtype,

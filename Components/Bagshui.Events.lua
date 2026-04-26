@@ -95,6 +95,7 @@ end
 ---@param arg3 any? Parameter for `Bagshui:QueueEvent()`.
 ---@param arg4 any? Parameter for `Bagshui:QueueEvent()`.
 function Bagshui:QueueClassCallback(classInstance, classFunction, delaySeconds, noReset, arg1, arg2, arg3, arg4)
+	assert(type(classFunction) == "function", "Bagshui:QueueClassCallback() - classFunction is nil or not a function (classInstance=" .. tostring(classInstance) .. ")")
 	-- Create a unique identifier for this event since it's not a predefined event string.
 	local eventId = tostring(classInstance) .. ":" .. tostring(classFunction)
 	if self:QueueEvent(eventId, delaySeconds, noReset, arg1, arg2, arg3, arg4) then

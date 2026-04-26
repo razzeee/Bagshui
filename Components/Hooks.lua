@@ -105,12 +105,12 @@ function Hooks:SetHook(wowApiFunctionName, newFunction, registrationAction, clas
 
 			-- Install hook.
 			-- Not using variadic arguments (...) - see https://github.com/shagu/pfUI/commit/e7dd8776f142a708e4677c1299ff89f1bcbe2baf
-			_G.setglobal(wowApiFunctionName, function(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+			_G[wowApiFunctionName] = function(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
 				if classSelf then
 					return hookFunction(classSelf, wowApiFunctionName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
 				end
 				return hookFunction(wowApiFunctionName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
-			end)
+			end
 
 		else
 			Bagshui:PrintDebug("Hook function for '" .. wowApiFunctionName .. "' is already installed")
@@ -122,7 +122,7 @@ function Hooks:SetHook(wowApiFunctionName, newFunction, registrationAction, clas
 		originalFunction = self.originalHookFunctions[wowApiFunctionName]
 
 		if originalFunction ~= _G[wowApiFunctionName] then
-			_G.setglobal(wowApiFunctionName, originalFunction)
+			_G[wowApiFunctionName] = originalFunction
 			self.originalHookFunctions[wowApiFunctionName] = nil
 
 			Bagshui:PrintDebug("Hook function for '" ..wowApiFunctionName.. "' removed.")

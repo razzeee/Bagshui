@@ -23,7 +23,9 @@ Bagshui.config.Inventory = {
 		bagButtonTemplate = "BagshuiBagsContainerTemplate",
 		-- Bag button inventory IDs are all offset by the same amount, starting
 		-- with the Backpack.
-		bagButtonIdOffset = _G.ContainerIDToInventoryID(0),
+		-- ContainerIDToInventoryID(0) would be ideal but some servers reject container ID 0,
+		-- so derive the offset from bag slot 1 instead (result is the same: typically 23).
+		bagButtonIdOffset = _G.ContainerIDToInventoryID(1) - 1,
 		-- PaperDollItemSlotButton code wants "Bag#Slot" when parsing the element's
 		-- name with `strsub(<name>, 10)`.
 		bagSlotNameFormat = "BgshiBagsBag%dSlot",
@@ -157,8 +159,11 @@ Bagshui.config.Inventory = {
 		--debug = true,
 	},
 
+}
 
-	[BS_INVENTORY_TYPE.KEYRING] = {
+-- Keyring was removed in WotLK 3.0. Only add the config if the API exists.
+if _G.GetKeyRingSize then
+	Bagshui.config.Inventory[BS_INVENTORY_TYPE.KEYRING] = {
 
 		dockTo = BS_INVENTORY_TYPE.BAGS,
 
@@ -195,8 +200,7 @@ Bagshui.config.Inventory = {
 
 		--debug = true,
 	}
-
-}
+end
 
 
 

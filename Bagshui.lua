@@ -13,6 +13,137 @@
 local _G = _G or getfenv()
 
 
+-- WotLK Compatibility Shim
+-- In Vanilla WoW (1.12), frame script handlers received event arguments via globals
+-- (_G.this, _G.event, _G.arg1-arg9). In WotLK (3.x), these globals were removed and
+-- arguments are passed directly to the handler function. This shim wraps SetScript so
+-- that the legacy globals are populated from function arguments, allowing Vanilla-style
+-- code to work on WotLK without modification.
+--
+-- Detection: WotLK has `GetSpellBookItemName`; Vanilla 1.12 does not.
+do
+	local _isWotlk = (_G.GetSpellBookItemName ~= nil)
+	if _isWotlk then
+		-- Re-entrancy depth counter: only clear globals when the outermost handler exits.
+		local _shimDepth = 0
+
+		-- Build the wrapper function factory.
+		local function makeWrapper(scriptType, handler)
+			return function(self, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+				_shimDepth = _shimDepth + 1
+
+				-- Save previous globals so nested calls can restore them.
+				local prev_this = _G.this
+				local prev_event = _G.event
+				local prev_arg1 = _G.arg1
+				local prev_arg2 = _G.arg2
+				local prev_arg3 = _G.arg3
+				local prev_arg4 = _G.arg4
+				local prev_arg5 = _G.arg5
+				local prev_arg6 = _G.arg6
+				local prev_arg7 = _G.arg7
+				local prev_arg8 = _G.arg8
+				local prev_arg9 = _G.arg9
+
+				_G.this = self
+				_G.arg1 = a1
+				_G.arg2 = a2
+				_G.arg3 = a3
+				_G.arg4 = a4
+				_G.arg5 = a5
+				_G.arg6 = a6
+				_G.arg7 = a7
+				_G.arg8 = a8
+				_G.arg9 = a9
+				if scriptType == "OnEvent" then
+					_G.event = a1
+					_G.arg1 = a2
+					_G.arg2 = a3
+					_G.arg3 = a4
+					_G.arg4 = a5
+				end
+				handler(self, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+
+				-- Restore previous globals so outer callers still see their values.
+				_G.this = prev_this
+				_G.event = prev_event
+				_G.arg1 = prev_arg1
+				_G.arg2 = prev_arg2
+				_G.arg3 = prev_arg3
+				_G.arg4 = prev_arg4
+				_G.arg5 = prev_arg5
+				_G.arg6 = prev_arg6
+				_G.arg7 = prev_arg7
+				_G.arg8 = prev_arg8
+				_G.arg9 = prev_arg9
+
+				_shimDepth = _shimDepth - 1
+			end
+		end
+
+		-- Attempt metatable hook (works if frames share a metatable).
+		local _shimInstalled = false
+		local _testFrame = _G.CreateFrame("Frame")
+		local _frameMeta = _G.getmetatable(_testFrame)
+		if _frameMeta and _frameMeta.__index and type(_frameMeta.__index.SetScript) == "function" then
+			local _origSetScriptFn = _frameMeta.__index.SetScript
+			_frameMeta.__index.SetScript = function(frame, scriptType, handler)
+				if handler then
+					_origSetScriptFn(frame, scriptType, makeWrapper(scriptType, handler))
+				else
+					_origSetScriptFn(frame, scriptType, nil)
+				end
+			end
+			-- Expose a raw SetScript bypass so secure handlers (PreClick/PostClick) can be
+			-- registered without the shim wrapper, preserving the game's secure context.
+			-- Usage: BagshuiSetScriptRaw(frame, scriptType, handler)
+			_G.BagshuiSetScriptRaw = function(frame, scriptType, handler)
+				_origSetScriptFn(frame, scriptType, handler)
+			end
+			_shimInstalled = true
+		end
+
+		-- Fallback: if metatable approach failed, expose makeWrapper so Bagshui's own
+		-- AddComponent() can wrap scripts. (Best-effort; won't cover all frames.)
+		if not _shimInstalled then
+			-- Store on Bagshui namespace for use later if needed.
+			_G.BagshuiWotlkScriptWrapper = makeWrapper
+			-- No-op fallback so call sites don't error.
+			_G.BagshuiSetScriptRaw = function(frame, scriptType, handler)
+				frame:SetScript(scriptType, handler)
+			end
+		end
+	end
+end
+
+-- Early patch for MoneyFrame_SetType: guard against nil moneyType argument.
+-- ElvUI calls SmallMoneyFrame_OnLoad (which calls MoneyFrame_SetType) during its
+-- ADDON_LOADED handler, which may fire before Bagshui's hook system is initialized.
+-- This raw patch is applied immediately at file load time to ensure it is always in place.
+--
+-- The function may be called in two ways depending on the client version:
+--   1.12 style (implicit this): MoneyFrame_SetType(moneyType)
+--   WotLK style (explicit frame): MoneyFrame_SetType(frame, moneyType)
+-- In both cases, when moneyType is nil there is nothing to do.
+do
+	local _origMoneyFrame_SetType = _G.MoneyFrame_SetType
+	if _origMoneyFrame_SetType then
+		_G.MoneyFrame_SetType = function(arg1, arg2)
+			-- WotLK style: arg1=frame, arg2=moneyType
+			-- 1.12 style:  arg1=moneyType, arg2=nil (this set implicitly)
+			local moneyType = arg2 ~= nil and arg2 or arg1
+			-- Only block calls where moneyType is nil AND arg1 is not a frame object.
+			-- If arg1 is a frame (WotLK style with no moneyType arg), pass through:
+			-- SmallMoneyFrame_OnLoad(self) calls MoneyFrame_SetType(self) with no moneyType
+			-- and WotLK's original defaults to "PLAYER" -- we must not block that.
+			if (moneyType == nil or type(moneyType) ~= "string") and type(arg1) ~= "table" then
+				return
+			end
+			_origMoneyFrame_SetType(arg1, arg2)
+		end
+	end
+end
+
 -- This environment will be loaded for all Bagshui code via `setfenv()`.  
 -- Top-level constants should be declared here as `BS_CONSTANT_NAME`.  
 -- Other constants can be added later via `Bagshui:AddConstants()`.  
@@ -818,10 +949,10 @@ local Bagshui = {
 		CloseAllWindows = "CloseAllWindows",
 		DeleteCursorItem = "ClearCursor",
 		MoneyFrame_UpdateMoney = "MoneyFrame_UpdateMoney",
+		MoneyFrame_SetType = "MoneyFrame_SetType",
 		OpenStackSplitFrame = "OpenStackSplitFrame",
 		PickupBagFromSlot = "PickupInventoryItem",
 		PickupInventoryItem = "PickupInventoryItem",
-		PutItemInBag = "PickupInventoryItem",
 		ToggleDropDownMenu = "ToggleDropDownMenu",
 		UIDropDownMenu_AddButton = "UIDropDownMenu_AddButton",
 	},
@@ -928,7 +1059,9 @@ function Bagshui:Init()
 		registeredEvents = {}
 	}
 	self.eventFrame:SetScript("OnEvent", function()
-		-- Vanilla WoW "passes" event parameters via global variables.
+		-- In Vanilla WoW, event parameters are passed via globals (_G.event, _G.arg1, etc.).
+		-- In WotLK+, they are function arguments; the SetScript shim at the top of this file
+		-- populates the globals from arguments so this code works on both versions.
 		self:OnEvent(_G.event, _G.arg1, _G.arg2, _G.arg3, _G.arg4)
 	end)
 	self.eventFrame:SetScript("OnUpdate", function()
@@ -1147,7 +1280,9 @@ function Bagshui:OnEvent(event, arg1, arg2, arg3, arg4)
 	if event == "PLAYER_LOGIN" then
 		-- Do compatibility check after everything else is definitely loaded.
 		if not self.startupCompatChecked then
-			self:QueueClassCallback(self, self.CheckCompat, 1)
+			if self.CheckCompat then
+				self:QueueClassCallback(self, self.CheckCompat, 1)
+			end
 			self.startupCompatChecked = true
 		end
 	end
@@ -1248,3 +1383,22 @@ end
 -- lua-language-server hack to remove "undefined-field" errors when accessing WoW API via _G.
 ---@class _G
 ---@field [string] any
+
+
+--- Use an item in a container slot without causing taint on WotLK.
+--- UseContainerItem() is a protected function on WotLK 3.3.5; calling it directly from
+--- addon Lua in a non-hardware-event context causes a taint error that blocks the action.
+--- This works around it by routing the call through a hidden SecureActionButtonTemplate
+--- button whose :Click() is invoked from C, satisfying the secure execution requirement.
+---@param bagNum number Bag number.
+---@param slotNum number Slot number within the bag.
+function Bagshui:UseContainerItemSecure(bagNum, slotNum)
+	if not self._secureUseButton then
+		self._secureUseButton = _G.CreateFrame("Button", "BagshuiSecureUseButton", _G.UIParent, "SecureActionButtonTemplate")
+		self._secureUseButton:SetAttribute("type", "item")
+		self._secureUseButton:Hide()
+	end
+	self._secureUseButton:SetAttribute("bag", bagNum)
+	self._secureUseButton:SetAttribute("slot", slotNum)
+	self._secureUseButton:Click()
+end

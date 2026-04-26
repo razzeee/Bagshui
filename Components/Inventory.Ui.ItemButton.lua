@@ -63,10 +63,12 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 		buttonNum,
 		ui.buttons.itemSlots,
 		function(elementNum)
-			-- The button is created normally, then customized for Inventory use.
+			-- Use the default ItemButtonTemplate (no secure template) so that
+			-- uiFrame:Show() is not blocked by secure-frame taint propagation on WotLK.
+			-- Right-click UseContainerItem is handled via Bagshui's own OnClick logic.
 			local slotButton = ui:CreateItemSlotButton(
 				"Item"..elementNum,
-				inventory.uiFrame
+				inventory.uiFrame  -- Parented to uiFrame so buttons auto-hide with window.
 			)
 			ui.buttons.itemSlots[elementNum] = slotButton
 
@@ -242,6 +244,34 @@ function Inventory:ItemButton_OnEnter(itemButton)
 	-- when the frame is behind other frames.
 	buttonInfo.mouseIsOver = true
 
+	-- Position the secure right-click overlay over this button.
+	-- The overlay is a ContainerFrameItemButtonTemplate whose built-in secure
+	-- OnClick calls UseContainerItem without taint.
+	-- Hide when modifier keys are held or in edit mode (those combos have
+	-- special Bagshui behavior on right-click).
+	if
+		self.secureRightClickOverlay
+		and item and item.bagNum and item.slotNum and item.id and item.id > 0
+		and not self.editMode
+		and not _G.IsAltKeyDown()
+		and not _G.IsControlKeyDown()
+	then
+		local overlay = self.secureRightClickOverlay
+		local bagFrame = self.secureRightClickBagFrame
+		-- Set IDs so the template's secure handler gets the right bag/slot.
+		bagFrame:SetID(item.bagNum)
+		overlay:SetID(item.slotNum)
+		overlay.bagshuiItemButton = itemButton
+		-- Anchor directly to the item button — WoW handles cross-parent
+		-- scale conversion automatically with SetPoint.
+		overlay:ClearAllPoints()
+		overlay:SetAllPoints(itemButton)
+		overlay:SetFrameStrata("DIALOG")
+		overlay:Show()
+	elseif self.secureRightClickOverlay then
+		self.secureRightClickOverlay:Hide()
+	end
+
 	-- Highlight all items belonging to a category on mouseover in Edit Mode,
 	-- but only if an object hasn't been picked up.
 	if self.editState.cursorItem == nil then
@@ -393,7 +423,9 @@ function Inventory:ItemButton_OnEnter(itemButton)
 				-- (set up in InventoryUi:CreateInventoryItemSlotButton()) so the
 				-- GetID() and GetParent():GetID() functions will be overridden.
 				_G.this = itemButton.bagshuiData.getIdProxy or _G.this
-				_G[self.itemSlotTooltipFunction](itemButton.bagshuiData.getIdProxy)
+				-- Use pcall: Blizzard's ContainerFrameItemButton_OnEnter may access child
+				-- frames (e.g. Flash) that don't exist on Bagshui's item buttons.
+				pcall(_G[self.itemSlotTooltipFunction], itemButton.bagshuiData.getIdProxy)
 				_G.this = oldGlobalThis
 				-- `ContainerFrameItemButton_OnEnter()` will change the tooltip position
 				-- to something that ignores our custom offsets, so we need to fix that.
@@ -447,7 +479,7 @@ function Inventory:ItemButton_OnEnter(itemButton)
 							end
 						end
 					end
-					_G.GameTooltipMoneyFrame:Hide()
+					if _G.GameTooltipMoneyFrame then _G.GameTooltipMoneyFrame:Hide() end
 				end
 			end
 
@@ -862,8 +894,6 @@ function Inventory:ItemButton_OnUpdate(elapsed)
 end
 
 
-
---- Left and right click and all the modifier key combinations.
 ---@param mouseButton string
 ---@param isDrag number|nil|boolean
 function Inventory:ItemButton_OnClick(mouseButton, isDrag)
@@ -1183,6 +1213,11 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 				_G.this = itemButton.bagshuiData.getIdProxy or _G.this
 
 				if mouseButton == "LeftButton" then
+					-- If a spell is targeting (e.g. Disenchant), the template's OnClick already
+					-- called UseContainerItem to complete the cast. Don't also pick up the item.
+					if _G.SpellIsTargeting and _G.SpellIsTargeting() then
+						-- Nothing to do; template handled it.
+					else
 					-- Normal left-click.
 					-- This will eventually become a call to ContainerFrameItemButton_OnClick(), which can handle:
 					-- - Control+click dress-up.
@@ -1192,14 +1227,14 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 					-- It also allows hooks to both ContainerFrameItemButton_OnClick() and PickupContainerItem() to work.
 					-- (See the declaration of Bagshui:PickupItem() for details about why it exists.)
 					Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
+					end
 
 				else
-					-- Normal right-click.
-					-- ContainerFrameItemButton_OnClick() for right button will handle:
-					-- - Shift+right-click stack splitting at merchant.
-					-- - Otherwise calling UseContainerItem().
-					-- It also allows hooks to both ContainerFrameItemButton_OnClick() and UseContainerItem() to work.
-					_G.ContainerFrameItemButton_OnClick(mouseButton)
+					-- Normal right-click: UseContainerItem is handled by the secure
+					-- right-click overlay (ContainerFrameItemButtonTemplate button
+					-- positioned on top of each item slot in OnEnter).  The Bagshui
+					-- OnClick should not reach here for plain right-click because the
+					-- overlay captures RightButtonUp.  Nothing to do from addon code.
 				end
 				-- Restore global this.
 				_G.this = oldGlobalThis
@@ -1269,7 +1304,15 @@ end
 function Inventory:ContainerItemAction(item, action, altDown)
 	local oldIsAltKeyDown = _G.IsAltKeyDown
 	_G.IsAltKeyDown = altDown and BsUtil.ReturnTrue or BsUtil.ReturnFalse
-	_G[(string.lower(action or "") == "use" and "UseContainerItem" or "PickupContainerItem")](item.bagNum, item.slotNum)
+	if string.lower(action or "") == "use" then
+		-- UseContainerItem is protected on WotLK. For the normal right-click path it was
+		-- already called at the top of _itemSlotButton_RawPostClick (secure context).
+		-- For special-case paths (vendor alt-click, mail, etc.) we call it here; those
+		-- will taint on this server but there is no better option for those code paths.
+		_G.UseContainerItem(item.bagNum, item.slotNum)
+	else
+		_G.PickupContainerItem(item.bagNum, item.slotNum)
+	end
 	_G.IsAltKeyDown = oldIsAltKeyDown
 end
 

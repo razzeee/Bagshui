@@ -45,7 +45,7 @@ function Bank:ReplaceBlizzardBank(replace)
 		if self.blizzBankFrame:IsVisible() then
 			self.blizzBankFrame:Hide()
 		end
-		_G.setglobal("BankFrame", self.uiFrame)
+		_G["BankFrame"] = self.uiFrame
 
 	else
 		-- Can't restore if we haven't done the takeover.
@@ -61,7 +61,7 @@ function Bank:ReplaceBlizzardBank(replace)
 
 		-- Make the switch.
 		self:Close()
-		_G.setglobal("BankFrame", self.blizzBankFrame)
+		_G["BankFrame"] = self.blizzBankFrame
 	end
 end
 
@@ -239,8 +239,10 @@ end
 function Bank:Open()
 	-- Determine whether we're at the bank.
 	-- `self.online` will be updated in `Bank:Update()`.
+	-- Use self.lastEvent (set by Inventory:OnEvent) as WotLK no longer sets _G.event.
+	local currentEvent = self.lastEvent or _G.event
 	self.atBank = (
-		_G.event == "BANKFRAME_OPENED"
+		currentEvent == "BANKFRAME_OPENED"
 		or (self.settings.replaceBank == false and self.ui:IsFrameVisible(self.blizzBankFrame))
 	)
 	self.windowUpdateNeeded = true
@@ -248,7 +250,7 @@ function Bank:Open()
 
 	-- Don't respond to open event when we're not hooking the Bank,
 	-- but do update online state via `Bank:Update()`.
-	if _G.event == "BANKFRAME_OPENED" and self.settings.replaceBank == false then
+	if currentEvent == "BANKFRAME_OPENED" and self.settings.replaceBank == false then
 		return
 	end
 
@@ -263,14 +265,16 @@ function Bank:Close()
 	-- Closing the bank can never mean we're at the bank, so only
 	-- change `atBank` if it's currently true.
 	-- `self.online` will be updated in `Bank:Update()`.
+	-- Use self.lastEvent (set by Inventory:OnEvent) as WotLK no longer sets _G.event.
+	local currentEvent = self.lastEvent or _G.event
 	if self.atBank then
-		self.atBank = (_G.event ~= "BANKFRAME_CLOSED")
+		self.atBank = (currentEvent ~= "BANKFRAME_CLOSED")
 	end
 	self.windowUpdateNeeded = true
 	self:Update()
 
 	-- Don't respond to close event when we're not hooking the Bank.
-	if _G.event == "BANKFRAME_CLOSED" and self.settings.replaceBank == false then
+	if currentEvent == "BANKFRAME_CLOSED" and self.settings.replaceBank == false then
 		return
 	end
 

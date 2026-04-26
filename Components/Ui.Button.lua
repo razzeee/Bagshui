@@ -249,7 +249,8 @@ function Ui:CreateIconButton(buttonOpts)
 	local button = _G.CreateFrame(
 		"Button",
 		self:CreateElementName((buttonOpts.namePrefix or "button") .. buttonOpts.name),
-		buttonOpts.parentFrame
+		buttonOpts.parentFrame,
+		buttonOpts.template  -- optional XML template (e.g. "SecureActionButtonTemplate")
 	)
 
 	-- Change frame level.

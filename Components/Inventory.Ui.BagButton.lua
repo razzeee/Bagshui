@@ -396,7 +396,7 @@ function InventoryUi:CreateBagSlotButtons()
 					_G.OutfitterQuickSlots:Show()
 				end
 
-				oldOnClick()
+				oldOnClick(this)
 
 				-- Undo the Outfitter workaround. 
 				if outfitterQuickSlotsOldParent then

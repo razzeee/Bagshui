@@ -492,7 +492,10 @@ function Inventory:New(newPropsOrInventoryType)
 		classObj.myContainerIds[containerId] = index
 		-- Starting inventory ID mapping at index 2 because primary containers are never inventory slots into which bags can be equipped.
 		if index > 1 then
-			classObj.inventoryIdsToContainerIds[_G.ContainerIDToInventoryID(containerId)] = containerId
+			local ok, inventoryId = pcall(_G.ContainerIDToInventoryID, containerId)
+			if ok then
+				classObj.inventoryIdsToContainerIds[inventoryId] = containerId
+			end
 		end
 	end
 

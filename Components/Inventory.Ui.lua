@@ -39,8 +39,58 @@ function Inventory:InitUi()
 	local uiFrame = self.uiFrame
 
 	-- Start with the window in the correct position and hidden.
+	self.anchorDirty = true  -- Ensure initial SetPoint runs in FixWindowPosition.
 	self:FixWindowPosition()
 	uiFrame:Hide()
+
+	-- Secure right-click overlay for UseContainerItem.
+	-- UseContainerItem is protected on WotLK; the only way to call it without
+	-- taint is through a real hardware click on a ContainerFrameItemButtonTemplate
+	-- button whose GetID() and GetParent():GetID() return the correct slot and bag.
+	-- We create ONE such overlay button, reposition it on top of whichever item
+	-- slot the mouse enters, and let the template's built-in secure OnClick handle
+	-- the right-click → UseContainerItem call.
+	do
+		-- Intermediate parent frame whose SetID(bagNum) satisfies
+		-- GetParent():GetID() in the template's secure OnClick.
+		local overlayBagFrame = _G.CreateFrame(
+			"Frame",
+			ui:CreateElementName("SecureOverlayBag"),
+			_G.UIParent
+		)
+		overlayBagFrame:SetID(0)
+
+		-- The overlay button uses ContainerFrameItemButtonTemplate which has
+		-- a built-in secure OnClick calling ContainerFrameItemButton_OnClick.
+		local overlayButton = _G.CreateFrame(
+			"Button",
+			ui:CreateElementName("SecureOverlay"),
+			overlayBagFrame,
+			"ContainerFrameItemButtonTemplate"
+		)
+		overlayButton:SetID(0)
+		-- Only capture right-clicks; left-clicks pass through to the Bagshui button.
+		overlayButton:RegisterForClicks("RightButtonUp")
+		-- DEBUG: Make overlay visible so we can confirm positioning.
+		overlayButton:SetAlpha(0.01)
+		overlayButton:Hide()
+
+		local inv = self
+		overlayButton:SetScript("OnEnter", function()
+			if overlayButton.bagshuiItemButton then
+				inv:ItemButton_OnEnter(overlayButton.bagshuiItemButton)
+			end
+		end)
+		overlayButton:SetScript("OnLeave", function()
+			if overlayButton.bagshuiItemButton then
+				inv:ItemButton_OnLeave(overlayButton.bagshuiItemButton)
+			end
+			overlayButton:Hide()
+		end)
+
+		self.secureRightClickOverlay = overlayButton
+		self.secureRightClickBagFrame = overlayBagFrame
+	end
 
 	-- Add scripts.
 
@@ -883,38 +933,72 @@ function Inventory:InitUi()
 	})
 
 
-	-- Disenchant button.
-	buttons.toolbar.disenchant = ui:CreateIconButton({
-		name = "Disenchant",
-		parentFrame = footer,
-		anchorPoint = "RIGHT",
-		anchorToFrame = buttons.toolbar.clam,
-		anchorToPoint = "LEFT",
-		disable = false,
-		texture = "Disenchant",
-		onClick = inventory_SpellButton_OnClick,
-		onEnter = inventory_SpellButton_OnEnter,
-		onLeave = inventory_SpellButton_OnLeave,
-		onUpdate = inventory_SpellButton_OnUpdate,
-	})
-	buttons.toolbar.disenchant.bagshuiData.spellName = L.Spell_Disenchant
+	-- Disenchant and PickLock buttons (Bags only; Bank has these as false).
+	-- Parented to UIParent (not footer/uiFrame) so SecureActionButtonTemplate taint
+	-- does not propagate up to uiFrame and block uiFrame:Show() on WotLK.
+	if self.disenchantButton then
+		buttons.toolbar.disenchant = ui:CreateIconButton({
+			name = "Disenchant",
+			parentFrame = _G.UIParent,
+			anchorPoint = "RIGHT",
+			anchorToFrame = buttons.toolbar.clam,
+			anchorToPoint = "LEFT",
+			disable = false,
+			texture = "Disenchant",
+			-- No onClick: SecureActionButtonTemplate handles CastSpell without taint.
+			template = "SecureActionButtonTemplate",
+			onEnter = inventory_SpellButton_OnEnter,
+			onLeave = inventory_SpellButton_OnLeave,
+			onUpdate = inventory_SpellButton_OnUpdate,
+		})
+		buttons.toolbar.disenchant.bagshuiData.spellName = L.Spell_Disenchant
+		buttons.toolbar.disenchant:SetAttribute("type", "spell")
+		buttons.toolbar.disenchant:SetAttribute("spell", L.Spell_Disenchant)
+		-- Close menus on click without tainting CastSpell (hook runs after secure action).
+		buttons.toolbar.disenchant:HookScript("OnClick", function(self)
+			ui:CloseMenusAndClearFocuses(true, true, false)
+		end)
+		buttons.toolbar.disenchant:Hide()
+	end
 
+	if self.pickLockButton then
+		-- Pick Lock button anchors to Disenchant if it exists, otherwise to clam.
+		local pickLockAnchorFrame = buttons.toolbar.disenchant or buttons.toolbar.clam
+		buttons.toolbar.pickLock = ui:CreateIconButton({
+			name = "PickLock",
+			parentFrame = _G.UIParent,
+			anchorPoint = "RIGHT",
+			anchorToFrame = pickLockAnchorFrame,
+			anchorToPoint = "LEFT",
+			disable = false,
+			texture = "PickLock",
+			-- No onClick: SecureActionButtonTemplate handles CastSpell without taint.
+			template = "SecureActionButtonTemplate",
+			onEnter = inventory_SpellButton_OnEnter,
+			onLeave = inventory_SpellButton_OnLeave,
+			onUpdate = inventory_SpellButton_OnUpdate,
+		})
+		buttons.toolbar.pickLock.bagshuiData.spellName = L.Spell_PickLock
+		buttons.toolbar.pickLock:SetAttribute("type", "spell")
+		buttons.toolbar.pickLock:SetAttribute("spell", L.Spell_PickLock)
+		buttons.toolbar.pickLock:HookScript("OnClick", function(self)
+			ui:CloseMenusAndClearFocuses(true, true, false)
+		end)
+		buttons.toolbar.pickLock:Hide()
+	end
 
-	-- Pick Lock button.
-	buttons.toolbar.pickLock = ui:CreateIconButton({
-		name = "PickLock",
-		parentFrame = footer,
-		anchorPoint = "RIGHT",
-		anchorToFrame = buttons.toolbar.disenchant,
-		anchorToPoint = "LEFT",
-		disable = false,
-		texture = "PickLock",
-		onClick = inventory_SpellButton_OnClick,
-		onEnter = inventory_SpellButton_OnEnter,
-		onLeave = inventory_SpellButton_OnLeave,
-		onUpdate = inventory_SpellButton_OnUpdate,
-	})
-	buttons.toolbar.pickLock.bagshuiData.spellName = L.Spell_PickLock
+	-- Since these spell buttons are parented to UIParent (not uiFrame), they must be
+	-- shown/hidden manually when the inventory window opens and closes.
+	-- Store the list on self so UiFrame_OnShow/OnHide can access it.
+	do
+		local spellBtns = {}
+		local n = 0
+		if buttons.toolbar.disenchant then n = n + 1; spellBtns[n] = buttons.toolbar.disenchant end
+		if buttons.toolbar.pickLock then n = n + 1; spellBtns[n] = buttons.toolbar.pickLock end
+		if n > 0 then
+			self.secureSpellButtons = spellBtns
+		end
+	end
 
 
 
@@ -1141,6 +1225,12 @@ end
 --- - Pending trade-with-another player item cleared.
 function Inventory:UiFrame_OnShow()
 
+	-- Guard against re-entrant calls (e.g. SetScale inside Update() can retrigger OnShow).
+	if self._onShowInProgress then
+		return
+	end
+	self._onShowInProgress = true
+
 	if self.dockTo then
 		-- Used by SetDockedToFrameVisibility() to decide whether the  frame to which this
 		-- one is docked should also be closed when this frame is closed.
@@ -1172,8 +1262,19 @@ function Inventory:UiFrame_OnShow()
 	self.inventoryUpdateAllowed = true
 	self.cacheUpdateNeeded = true
 	self:NotifySkinOfPositionChange()
+	-- Re-apply saved anchor on every open, bypassing anchorDirty so UpdateWindow's
+	-- FixWindowPosition(true) call (which runs immediately after via Update()) does not
+	-- re-run ClearAllPoints+SetPoint and cause the window to jump.
+	-- Skip RescueWindow here: the window hasn't been laid out yet (Update() hasn't run),
+	-- so GetLeft()/GetRight() reflect stale geometry and would cause false rescues.
+	self:ApplyWindowPosition(true)
+	-- Show any spell buttons parented outside uiFrame (e.g. Disenchant, PickLock).
+	if self.secureSpellButtons then
+		for _, btn in ipairs(self.secureSpellButtons) do btn:Show() end
+	end
 	-- Do NOT use QueueUpdate() here.
 	self:Update()
+	self._onShowInProgress = false
 end
 
 
@@ -1186,11 +1287,20 @@ end
 --- - Reset the 
 --- - If there's a frame docked to this one, close it.
 function Inventory:UiFrame_OnHide()
+	self.dragInProgress = false
 	self.uiFrame:StopMovingOrSizing()
 	self:ClearSearch()
 	self:CloseMenusAndClearFocuses()
 	self:ClearEditModeCursor()
 	self:SetCharacter(Bagshui.currentCharacterId)
+	-- Hide any spell buttons parented outside uiFrame (e.g. Disenchant, PickLock).
+	if self.secureSpellButtons then
+		for _, btn in ipairs(self.secureSpellButtons) do btn:Hide() end
+	end
+	-- Hide the secure right-click overlay.
+	if self.secureRightClickOverlay then
+		self.secureRightClickOverlay:Hide()
+	end
 
 	_G.PlaySound(self.closeSound)
 
@@ -1210,6 +1320,7 @@ function Inventory:UiFrame_OnDragStart()
 	elseif not self.settings.windowLocked then
 		-- Has to be self instead of "this" because it can be called from docked windows.
 		self.dragInProgress = true
+		self.anchorDirty = true
 		self.uiFrame:StartMoving()
 	end
 end
@@ -1488,8 +1599,25 @@ function Inventory:FixWindowPosition(noRescueAttempts)
 		return
 	end
 
-	-- As soon as a frame is dragged, its anchor changes to TOPLEFT, which leads to undesirable behavior
-	-- when the frame is resized. We have to reset the anchor and position to keep things happy.
+	if not self.anchorDirty then
+		self:FixSettingsMenuPosition()
+		if not noRescueAttempts then
+			self:RescueWindow()
+		end
+		return
+	end
+	self.anchorDirty = false
+	self:ApplyWindowPosition(noRescueAttempts)
+end
+
+
+
+--- Apply the saved window anchor position unconditionally (no anchorDirty / dragInProgress checks).
+--- Called directly from UiFrame_OnShow so the anchor is restored on every open without
+--- setting anchorDirty=true (which would cause UpdateWindow's FixWindowPosition(true) call
+--- to re-run ClearAllPoints+SetPoint and jump the window).
+---@param noRescueAttempts boolean?
+function Inventory:ApplyWindowPosition(noRescueAttempts)
 	self.uiFrame:ClearAllPoints()
 	self.uiFrame:SetPoint(
 		self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint,
@@ -1498,11 +1626,7 @@ function Inventory:FixWindowPosition(noRescueAttempts)
 		self.settings.windowAnchorXOffset / self.uiFrame:GetScale(),
 		self.settings.windowAnchorYOffset / self.uiFrame:GetScale()
 	)
-
-	-- Ensure the Settings menu is in the right spot.
 	self:FixSettingsMenuPosition()
-
-	-- Make sure the window is onscreen.
 	if not noRescueAttempts then
 		self:RescueWindow()
 	end
@@ -1725,6 +1849,32 @@ function Inventory:GetHookSettingName(hookFunctionName, bagNumParam)
 
 	---@diagnostic disable-next-line: return-type-mismatch
 	return retVal
+end
+
+
+
+--- Return (creating if needed) an invisible container frame for the given bag number.
+--- Item slot buttons are parented to these frames so that ContainerFrameItemButton_OnClick's
+--- `self:GetParent():GetID()` call returns the correct bag number without tainting UseContainerItem.
+--- Each bag container frame is a child of uiFrame, has SetID(bagNum), and sits at a high
+--- frame level so item buttons render above group background frames.
+---@param bagNum number
+---@return table frame
+function Inventory:GetBagContainerFrame(bagNum)
+	if not self._bagContainerFrames then
+		self._bagContainerFrames = {}
+	end
+	if not self._bagContainerFrames[bagNum] then
+		-- Parent to uiFrame so item buttons inherit visibility (hide/show with the window).
+		-- Frame level is set above uiFrame's level so buttons render above group backgrounds.
+		local f = _G.CreateFrame("Frame", nil, self.uiFrame)
+		f:SetWidth(1)
+		f:SetHeight(1)
+		f:SetPoint("TOPLEFT", self.uiFrame, "TOPLEFT", 0, 0)
+		f:SetID(bagNum)
+		self._bagContainerFrames[bagNum] = f
+	end
+	return self._bagContainerFrames[bagNum]
 end
 
 

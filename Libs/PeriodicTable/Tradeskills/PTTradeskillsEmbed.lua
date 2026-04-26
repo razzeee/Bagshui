@@ -6,13 +6,13 @@ local libvarname = "PTTradeskillsEmbed"
 
 -- Check to see if an update is needed
 -- if not then just return out now before we do anything
-local libobj = getglobal(libvarname)
+local libobj = _G[libvarname]
 if libobj and not libobj:NeedsUpgraded(vmajor, vminor) then return end
 
-local stubobj = getglobal(stubvarname)
+local stubobj = _G[stubvarname]
 if not stubobj then
 	stubobj = {}
-	setglobal(stubvarname, stubobj)
+	_G[stubvarname] = stubobj
 
 
 	-- Instance replacement method, replace contents of old with that of new
@@ -82,7 +82,7 @@ end
 
 if not libobj then
 	libobj = stubobj:NewStub(libvarname)
-	setglobal(libvarname, libobj)
+	_G[libvarname] = libobj
 end
 
 local lib = {}
@@ -219,7 +219,9 @@ end
 --      Craft parsing      --
 -----------------------------
 
--- Craft == enchanting, tradeskill == everything else
+-- Craft == enchanting in Vanilla; in WotLK+ Enchanting uses the standard TradeSkill API.
+-- Only register this handler if the Craft API exists (Vanilla 1.12).
+if GetNumCrafts then
 function lib:CRAFT_SHOW()
 	local trade = GetCraftName()
 	if not self.tradedata[trade] then self.tradedata[trade] = {} end
@@ -251,6 +253,7 @@ function lib:ParseCraftItem(idx)
 
 	return retval
 end
+end  -- if GetNumCrafts
 
 
 --------------------------------
