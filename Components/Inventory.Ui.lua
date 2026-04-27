@@ -934,12 +934,11 @@ function Inventory:InitUi()
 
 
 	-- Disenchant and PickLock buttons (Bags only; Bank has these as false).
-	-- Parented to UIParent (not footer/uiFrame) so SecureActionButtonTemplate taint
-	-- does not propagate up to uiFrame and block uiFrame:Show() on WotLK.
+	-- Use SecureActionButtonTemplate so CastSpell is called in a secure context.
 	if self.disenchantButton then
 		buttons.toolbar.disenchant = ui:CreateIconButton({
 			name = "Disenchant",
-			parentFrame = _G.UIParent,
+			parentFrame = footer,
 			anchorPoint = "RIGHT",
 			anchorToFrame = buttons.toolbar.clam,
 			anchorToPoint = "LEFT",
@@ -966,7 +965,7 @@ function Inventory:InitUi()
 		local pickLockAnchorFrame = buttons.toolbar.disenchant or buttons.toolbar.clam
 		buttons.toolbar.pickLock = ui:CreateIconButton({
 			name = "PickLock",
-			parentFrame = _G.UIParent,
+			parentFrame = footer,
 			anchorPoint = "RIGHT",
 			anchorToFrame = pickLockAnchorFrame,
 			anchorToPoint = "LEFT",
@@ -987,19 +986,6 @@ function Inventory:InitUi()
 		buttons.toolbar.pickLock:Hide()
 	end
 
-	-- Since these spell buttons are parented to UIParent (not uiFrame), they must be
-	-- shown/hidden manually when the inventory window opens and closes.
-	-- Store the list on self so UiFrame_OnShow/OnHide can access it.
-	do
-		local spellBtns = {}
-		local n = 0
-		if buttons.toolbar.disenchant then n = n + 1; spellBtns[n] = buttons.toolbar.disenchant end
-		if buttons.toolbar.pickLock then n = n + 1; spellBtns[n] = buttons.toolbar.pickLock end
-		if n > 0 then
-			self.secureSpellButtons = spellBtns
-		end
-	end
-
 
 
 	-- Bottom right toolbar order, consumed by `Inventory:UpdateToolbarAnchoring()`
@@ -1008,11 +994,11 @@ function Inventory:InitUi()
 		frames.bottomRightToolbarAnchor,
 		frames.money,
 		-BsSkin.toolbarGroupSpacing,
-		buttons.toolbar.hearthstone,
-		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.clam,
 		buttons.toolbar.pickLock,
 		buttons.toolbar.disenchant,
+		-BsSkin.toolbarGroupSpacing,
+		buttons.toolbar.hearthstone,
 	}
 
 
@@ -1268,10 +1254,7 @@ function Inventory:UiFrame_OnShow()
 	-- Skip RescueWindow here: the window hasn't been laid out yet (Update() hasn't run),
 	-- so GetLeft()/GetRight() reflect stale geometry and would cause false rescues.
 	self:ApplyWindowPosition(true)
-	-- Show any spell buttons parented outside uiFrame (e.g. Disenchant, PickLock).
-	if self.secureSpellButtons then
-		for _, btn in ipairs(self.secureSpellButtons) do btn:Show() end
-	end
+	-- Do NOT use QueueUpdate() here.
 	-- Do NOT use QueueUpdate() here.
 	self:Update()
 	self._onShowInProgress = false
@@ -1293,10 +1276,6 @@ function Inventory:UiFrame_OnHide()
 	self:CloseMenusAndClearFocuses()
 	self:ClearEditModeCursor()
 	self:SetCharacter(Bagshui.currentCharacterId)
-	-- Hide any spell buttons parented outside uiFrame (e.g. Disenchant, PickLock).
-	if self.secureSpellButtons then
-		for _, btn in ipairs(self.secureSpellButtons) do btn:Hide() end
-	end
 	-- Hide the secure right-click overlay.
 	if self.secureRightClickOverlay then
 		self.secureRightClickOverlay:Hide()
@@ -1320,7 +1299,6 @@ function Inventory:UiFrame_OnDragStart()
 	elseif not self.settings.windowLocked then
 		-- Has to be self instead of "this" because it can be called from docked windows.
 		self.dragInProgress = true
-		self.anchorDirty = true
 		self.uiFrame:StartMoving()
 	end
 end
@@ -1335,10 +1313,16 @@ function Inventory:UiFrame_OnDragStop()
 		-- Has to be self instead of "this" because it can be called from docked windows.
 		self.dragInProgress = false
 		self.uiFrame:StopMovingOrSizing()
-		self:FixSettingsMenuPosition()
+
+		-- Save position and re-apply the correct anchor so the window grows
+		-- in the right direction on subsequent layout changes.
 		self:SaveWindowPosition()
+		self:ApplyWindowPosition(true)
+
+		self:FixSettingsMenuPosition()
 		self:NotifySkinOfPositionChange()
 	end
+end
 end
 
 
@@ -1618,13 +1602,14 @@ end
 --- to re-run ClearAllPoints+SetPoint and jump the window).
 ---@param noRescueAttempts boolean?
 function Inventory:ApplyWindowPosition(noRescueAttempts)
+	local effectiveScale = self.uiFrame:GetEffectiveScale()
 	self.uiFrame:ClearAllPoints()
 	self.uiFrame:SetPoint(
 		self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint,
 		_G.UIParent,
 		self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint,
-		self.settings.windowAnchorXOffset / self.uiFrame:GetScale(),
-		self.settings.windowAnchorYOffset / self.uiFrame:GetScale()
+		self.settings.windowAnchorXOffset / effectiveScale,
+		self.settings.windowAnchorYOffset / effectiveScale
 	)
 	self:FixSettingsMenuPosition()
 	if not noRescueAttempts then
@@ -1719,17 +1704,24 @@ end
 
 
 --- Calculate the current window offset from the given point.
+--- The returned value is in screen pixels so that it can be converted back to
+--- frame-relative coordinates in ApplyWindowPosition by dividing by frameScale.
 ---@param point string LEFT/RIGHT/TOP/BOTTOM
 ---@return number
 function Inventory:GetWindowOffset(point)
-	-- Calling, for example, self.uiFrame:GetLeft()
+	-- GetLeft/Right/Top/Bottom return values in the frame's coordinate system.
+	-- Multiply by effective scale (not just frame scale) to get screen pixels,
+	-- because effective scale = UIParent:GetScale() * frame:GetScale().
+	local effectiveScale = self.uiFrame:GetEffectiveScale()
 	local offset =
 		self.uiFrame["Get" .. BsUtil.Capitalize(point)](self.uiFrame)
-		* self.uiFrame:GetScale()
+		* effectiveScale
 
 	if string.upper(point) == "RIGHT" or string.upper(point) == "TOP" then
 		local dimension = (string.upper(point) == "RIGHT") and "Width" or "Height"
-		offset = -((_G.UIParent["Get" .. dimension](_G.UIParent) / _G.UIParent:GetScale()) - offset)
+		-- UIParent dimensions in screen pixels = GetWidth() * GetScale().
+		local parentSize = _G.UIParent["Get" .. dimension](_G.UIParent) * _G.UIParent:GetScale()
+		offset = -(parentSize - offset)
 	end
 
 	return offset
