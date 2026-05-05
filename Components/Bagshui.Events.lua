@@ -140,6 +140,17 @@ function Bagshui:ProcessEventQueue()
 				self.queuedEvents.classFunction[event] = nil
 			end
 
+			-- Suppress known-harmless WotLK UIDropDownMenu_Refresh signature mismatch.
+			-- The Blizzard DropDownList button scripts call UIDropDownMenu_Refresh(level)
+			-- with a number (1.12 convention) but this server's version expects a frame first.
+			-- This is cosmetic only -- menus still work correctly.
+			if not processEventQueue_success
+				and processEventQueue_errorMessage
+				and _G.string.find(processEventQueue_errorMessage, "UIDropDownMenu", 1, true)
+				and _G.string.find(processEventQueue_errorMessage, "dropdown", 1, true)
+			then
+				processEventQueue_success = true
+			end
 			assert(processEventQueue_success, processEventQueue_errorMessage)
 		end
 	end

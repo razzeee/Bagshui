@@ -367,16 +367,17 @@ function ObjectManager:InitUi()
 
 	-- Only allow escape to close the manager frame once all editors are closed.
 	uiFrame.bagshuiData.lastDirtyCheck = _G.GetTime()
-	uiFrame:SetScript("OnUpdate", function()
-		if _G.GetTime() - _G.this.bagshuiData.lastDirtyCheck > 0.075 then
-			_G.this.openChildrenCount = 0
+	local _omSetScript = _G.BagshuiSetScriptRaw or uiFrame.SetScript
+	_omSetScript(uiFrame, "OnUpdate", function()
+		if _G.GetTime() - uiFrame.bagshuiData.lastDirtyCheck > 0.075 then
+			uiFrame.openChildrenCount = 0
 			for _, editor in ipairs(self.editors) do
 				if editor.uiFrame:IsVisible() then
-					_G.this.openChildrenCount = _G.this.openChildrenCount + 1
+					uiFrame.openChildrenCount = uiFrame.openChildrenCount + 1
 				end
 			end
-			_G.this.bagshuiData.dirty = (_G.this.openChildrenCount > 0)
-			_G.this.bagshuiData.lastDirtyCheck = _G.GetTime()
+			uiFrame.bagshuiData.dirty = (uiFrame.openChildrenCount > 0)
+			uiFrame.bagshuiData.lastDirtyCheck = _G.GetTime()
 		end
 	end)
 

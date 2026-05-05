@@ -621,6 +621,12 @@ function Inventory:Init()
 	-- Set up WoW API function hooks.
 	self.hooks = Bagshui.prototypes.Hooks:New(self.apiFunctionsToHook, self)
 
+	-- WotLK: register bag open/close/toggle as secure post-hooks so Show()/Hide()
+	-- works during combat lockdown (hooksecurefunc runs in a secure context).
+	if self.apiFunctionsToHookSecure then
+		self.hooks:SetHooks(self.apiFunctionsToHookSecure, BS_HOOK_ACTION.SECURE_POST, self)
+	end
+
 	-- Build the GUI.
 	self:InitUi()
 	self:InitMenus()

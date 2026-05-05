@@ -194,13 +194,14 @@ function InventoryUi:CreateBagSlotButtons()
 
 		local onUpdate_refreshTooltip, onUpdate_cooldownStart, onUpdate_cooldownDuration, onUpdate_cooldownEnable
 
-		bagSlotButton:SetScript("OnUpdate", function(elapsed)
+		bagSlotButton:SetScript("OnUpdate", function(btn, elapsed)
+			btn = btn or _G.this
 			onUpdate_refreshTooltip = false
 
 			-- Remove item highlighting if there's no longer a container in the slot.
 			if
-				inventory.highlightItemsInContainerLocked == _G.this.bagshuiData.bagNum
-				and not inventory:BagSlotButtonHasBag(_G.this)
+				inventory.highlightItemsInContainerLocked == btn.bagshuiData.bagNum
+				and not inventory:BagSlotButtonHasBag(btn)
 				and not inventory.highlightItemsContainerSlot
 			then
 				inventory.highlightItemsInContainerLocked = nil
@@ -210,58 +211,40 @@ function InventoryUi:CreateBagSlotButtons()
 			end
 
 			-- "Progress bar" for bag swapping using the cooldown animation.
-			if type(_G.this.bagshuiData.progressPercent) == "number" then
-				-- Use this by setting the bagButton.bagshuiData.progressPercent property to a value 0-100.
-				-- At 100, the completion shine animation will trigger.
-
-				if not _G.this.bagshuiData.progressFinishing then
-					-- This has to run on every frame to hold the cooldown at the same spot.
+			if type(btn.bagshuiData.progressPercent) == "number" then
+				if not btn.bagshuiData.progressFinishing then
 					self:ShowProgressViaCooldown(
-						_G.this.bagshuiData.cooldown,
-						_G.this.bagshuiData.progressPercent
+						btn.bagshuiData.cooldown,
+						btn.bagshuiData.progressPercent
 					)
 				end
 
-				if _G.this.bagshuiData.progressPercent == 100 then
-					_G.this.bagshuiData.progressFinishing = true
+				if btn.bagshuiData.progressPercent == 100 then
+					btn.bagshuiData.progressFinishing = true
 				end
 
-				if _G.this.bagshuiData.progressFinishing and not _G.this.bagshuiData.cooldown:IsVisible() then
-					_G.this.bagshuiData.progressPercent = nil
-					_G.this.bagshuiData.progressFinishing = nil
+				if btn.bagshuiData.progressFinishing and not btn.bagshuiData.cooldown:IsVisible() then
+					btn.bagshuiData.progressPercent = nil
+					btn.bagshuiData.progressFinishing = nil
 				end
-
-			-- elseif this.bagshuiData.inventorySlotId then
-				-- Normal cooldown checking is disabled because I don't think bag cooldowns are even a thing.
-				-- Easy enough to restore if needed.
-				-- If it does get enabled, there will also need to be something added to
-				-- Ui:ShowProgressViaCooldown() to hide any cooldown text that was present.
-				--
-				-- Normal cooldown behavior (primary containers can't have cooldowns so they're excluded.)
-				-- onUpdate_cooldownStart, onUpdate_cooldownDuration, onUpdate_cooldownEnable = _G.GetInventoryItemCooldown("player", _G.this.bagshuiData.inventorySlotId)
-				-- _G.CooldownFrame_SetTimer(_G.this.bagshuiData.cooldown, onUpdate_cooldownStart, onUpdate_cooldownDuration, onUpdate_cooldownEnable);
 			end
 
 			-- Safeguard to prevent tooltips from popping up when the mouse has already left.
-			if not _G.this.bagshuiData.mouseIsOver then
-				_G.this.bagshuiData.tooltipCooldownUpdate = nil
+			if not btn.bagshuiData.mouseIsOver then
+				btn.bagshuiData.tooltipCooldownUpdate = nil
 				return
 			end
 
-			if _G.this.bagshuiData.tooltipCooldownUpdate ~= nil then
-				-- tooltipCooldownUpdate is initially set to 1 by OnEnter when there's a cooldown.
-				-- Here we subtract the elapsed time in seconds, which will eventually go below 0
-				-- so long as the property isn't wiped by moving the mouse off this item.
-				_G.this.bagshuiData.tooltipCooldownUpdate = _G.this.bagshuiData.tooltipCooldownUpdate - elapsed
+			if btn.bagshuiData.tooltipCooldownUpdate ~= nil then
+				btn.bagshuiData.tooltipCooldownUpdate = btn.bagshuiData.tooltipCooldownUpdate - elapsed
 
-				-- Don't proceed until it's been more than 1 second.
-				if _G.this.bagshuiData.tooltipCooldownUpdate < 0 then
+				if btn.bagshuiData.tooltipCooldownUpdate < 0 then
 					onUpdate_refreshTooltip = true
 				end
 			end
 
 			if onUpdate_refreshTooltip then
-				inventory:ShowBagSlotTooltip(_G.this)
+				inventory:ShowBagSlotTooltip(btn)
 			end
 		end)
 
@@ -422,7 +405,7 @@ function InventoryUi:CreateBagSlotButtons()
 			end
 
 			if oldOnDragStart then
-				oldOnDragStart()
+				oldOnDragStart(_G.this)
 			end
 		end)
 

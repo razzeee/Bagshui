@@ -41,11 +41,67 @@ function Bank:ReplaceBlizzardBank(replace)
 		self.blizzBankFrame:UnregisterEvent("BANKFRAME_OPENED")
 		self.blizzBankFrame:UnregisterEvent("BANKFRAME_CLOSED")
 
-		-- Swap with the Blizzard bank frame.
+		-- Hide the Blizzard bank frame if it's open.
 		if self.blizzBankFrame:IsVisible() then
 			self.blizzBankFrame:Hide()
 		end
-		_G["BankFrame"] = self.uiFrame
+
+		-- Do NOT replace _G.BankFrame with our uiFrame.
+		-- The UIPanelWindows system calls ShowUIPanel(_G.BankFrame) whenever
+		-- panels are rearranged. We remove BankFrame from UIPanelWindows so
+		-- ShowUIPanel becomes a no-op for it — no SetPoint, no panel cascade,
+		-- no side-effect Show() calls on other panels (e.g. GuildBankFrame).
+		-- Bagshui Bank opens/closes independently via BANKFRAME_OPENED/CLOSED.
+		if not self._blizzBankFrameHooked then
+			self._blizzBankFrameHooked = true
+			local blizzFrame = self.blizzBankFrame
+			local blizzFrameName = blizzFrame:GetName()
+
+			-- Remove from UIPanelWindows so the panel system doesn't track it.
+			if _G.UIPanelWindows and blizzFrameName then
+				_G.UIPanelWindows[blizzFrameName] = nil
+			end
+
+			-- Hook ShowUIPanel to intercept calls for BankFrame and swallow them.
+			-- On this server ShowUIPanel proceeds even without a UIPanelWindows entry,
+			-- causing a panel cascade that shows GuildBankFrame and crashes ElvUI.
+			if _G.ShowUIPanel then
+				local origShowUIPanel = _G.ShowUIPanel
+				_G.ShowUIPanel = function(frame, ...)
+					if frame == blizzFrame or (blizzFrameName and frame == _G[blizzFrameName]) then
+						-- Bagshui Bank manages its own open/close via BANKFRAME_OPENED.
+						return
+					end
+					return origShowUIPanel(frame, ...)
+				end
+			end
+
+			-- Also hook HideUIPanel for symmetry so closing bank doesn't cascade.
+			if _G.HideUIPanel then
+				local origHideUIPanel = _G.HideUIPanel
+				_G.HideUIPanel = function(frame, ...)
+					if frame == blizzFrame or (blizzFrameName and frame == _G[blizzFrameName]) then
+						return
+					end
+					return origHideUIPanel(frame, ...)
+				end
+			end
+
+			-- Shrink and hide so it never renders if somehow shown.
+			blizzFrame:SetWidth(1)
+			blizzFrame:SetHeight(1)
+			blizzFrame:SetAlpha(0)
+
+			-- Suppress any residual Show() calls.
+			local origOnShow = blizzFrame:GetScript("OnShow")
+			blizzFrame:SetScript("OnShow", function()
+				if self.settings.replaceBank ~= false then
+					blizzFrame:Hide()
+				elseif origOnShow then
+					origOnShow()
+				end
+			end)
+		end
 
 	else
 		-- Can't restore if we haven't done the takeover.
@@ -122,9 +178,11 @@ function Bank:BagSlotButton_Init(bagSlotButton)
 		if self.containers[this.bagshuiData.bagNum].nextPurchasable then
 			_G.PlaySound("igMainMenuOption")
 			-- The CONFIRM_BUY_BANK_SLOT dialog looks at the nextSlotCost property of
-			-- BankFrame to get the cost. Since we're replacing BankFrame with our frame,
-			-- we need to set that property.
-			self.uiFrame.nextSlotCost = _G.GetBankSlotCost(this.bagshuiData.bagSlotNum)
+			-- BankFrame to get the cost. _G.BankFrame is still the original Blizzard
+			-- frame, so set it there.
+			local cost = _G.GetBankSlotCost(this.bagshuiData.bagSlotNum)
+			self.uiFrame.nextSlotCost = cost
+			if self.blizzBankFrame then self.blizzBankFrame.nextSlotCost = cost end
 			_G.StaticPopup_Show("CONFIRM_BUY_BANK_SLOT")
 		elseif not self.containers[this.bagshuiData.bagNum].purchased then
 			return

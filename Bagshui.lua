@@ -89,7 +89,37 @@ do
 			local _origSetScriptFn = _frameMeta.__index.SetScript
 			_frameMeta.__index.SetScript = function(frame, scriptType, handler)
 				if handler then
-					_origSetScriptFn(frame, scriptType, makeWrapper(scriptType, handler))
+					-- Only wrap scripts on Bagshui-owned frames.
+					-- Wrapping all frames globally causes taint on WoW's secure
+					-- frames and makes other addons' errors appear as Bagshui errors.
+					-- A frame is considered Bagshui-owned if:
+					--   (a) it is being set during Bagshui component loading, OR
+				--   (b) its name starts with "Bagshui".
+				-- Additionally, never wrap OnShow/OnHide/OnSizeChanged/OnUpdate — those fire
+				-- during secure execution paths (combat) or constantly (OnUpdate), and
+				-- wrapping them writes _G.this which taints frames and prevents
+				-- Hide()/Show() from working in combat.
+				-- All such handlers use explicit params or captured variables instead.
+				local noWrap = (
+					scriptType == "OnShow"
+					or scriptType == "OnHide"
+					or scriptType == "OnSizeChanged"
+					or scriptType == "OnUpdate"
+				)
+				if noWrap then
+					_origSetScriptFn(frame, scriptType, handler)
+				else
+					local isBagshuiFrame = Bagshui._loadingComponent
+					if not isBagshuiFrame then
+						local ok, name = pcall(function() return frame:GetName() end)
+						isBagshuiFrame = ok and name and _G.string.sub(name, 1, 7) == "Bagshui"
+					end
+					if isBagshuiFrame then
+						_origSetScriptFn(frame, scriptType, makeWrapper(scriptType, handler))
+					else
+						_origSetScriptFn(frame, scriptType, handler)
+					end
+				end
 				else
 					_origSetScriptFn(frame, scriptType, nil)
 				end
@@ -787,6 +817,9 @@ local bagshuiEnvironment = {
 		REGISTER = "Register",
 		UNREGISTER = "Unregister",
 		CHECK = "Check",
+		-- WotLK: post-hook via hooksecurefunc so handler runs in secure context,
+		-- allowing Show()/Hide() to work during combat lockdown.
+		SECURE_POST = "SecurePost",
 	},
 
 
@@ -1336,8 +1369,10 @@ local components = {}
 ---@param creationFunction function
 ---@param loadEvent string? Event to raise after `creationFunction` has run.
 function Bagshui:LoadComponent(creationFunction, loadEvent)
+	self._loadingComponent = true
 	setfenv(creationFunction, self.environment)
 	creationFunction()
+	self._loadingComponent = false
 	if loadEvent and self.RaiseEvent then
 		self:RaiseEvent(loadEvent)
 	end

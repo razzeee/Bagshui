@@ -9,11 +9,13 @@ local Bags = Bagshui.prototypes.Inventory:New(BS_INVENTORY_TYPE.BAGS)
 
 
 -- Hook handling.
-
--- The original WoW API function needs to be called for Close* and Toggle* if the
--- original container frame is open. If this isn't done, clicking the close button
--- on the original frame will only affect Bagshui and leave the  original frame
--- stuck on the screen forever.
+--
+-- These replace the global WoW API functions directly (like Bagnon/AdiBags),
+-- so the original never runs and native ContainerFrames never open.
+-- This avoids taint: our uiFrame:Show()/Hide() calls are never preceded by
+-- any protected-frame method call, so they work in combat lockdown too.
+-- CloseBackpack/CloseBag are intentionally not hooked (ElvUI calls them as
+-- side effects, which would immediately close Bagshui).
 
 --- Open bag hooks (OpenAllBags, OpenBackpack, OpenBag(bagNum)).
 ---@param hookFunctionName string Name of the original WoW API function.
@@ -175,7 +177,5 @@ function Bags:Close()
 	self:SmartOpenClose("Close")
 	self.lastOpenEventTrigger = nil
 end
-
-
 
 end)

@@ -69,8 +69,6 @@ function Inventory:InitUi()
 			"ContainerFrameItemButtonTemplate"
 		)
 		overlayButton:SetID(0)
-		-- Only capture right-clicks; left-clicks pass through to the Bagshui button.
-		overlayButton:RegisterForClicks("RightButtonUp")
 		-- DEBUG: Make overlay visible so we can confirm positioning.
 		overlayButton:SetAlpha(0.01)
 		overlayButton:Hide()
@@ -87,31 +85,98 @@ function Inventory:InitUi()
 			end
 			overlayButton:Hide()
 		end)
+		-- The overlay sits on top of item buttons and intercepts all mouse events
+		-- including drags. Handle OnDragStart here using the last hovered button
+		-- as the drag source (set in ItemButton_OnEnter).
+		overlayButton:RegisterForDrag("LeftButton")
+		overlayButton:RegisterForClicks("RightButtonUp", "LeftButtonUp")
+		overlayButton:SetScript("OnMouseDown", function(_, btn)
+			-- Snapshot the hovered button at mouse-down so OnDragStart uses the
+			-- correct source even after the mouse drifts to an adjacent slot.
+			if btn == "LeftButton" then
+				inv._dragSourceButton = inv._lastHoveredItemButton
+			end
+		end)
+		overlayButton:SetScript("OnDragStart", function()
+			local srcButton = inv._dragSourceButton or inv._lastHoveredItemButton
+			if srcButton then
+				local savedThis = _G.this
+				_G.this = srcButton
+				inv:ItemButton_OnClick("LeftButton", true)
+				_G.this = savedThis
+			end
+			inv._dragSourceButton = nil
+		end)
+		-- When the cursor is carrying an item and the player releases it over a
+		-- slot, forward the drop to the underlying Bagshui item button so items
+		-- can swap/stack correctly. OnReceiveDrag fires when a carried item is
+		-- dropped; we do NOT set OnClick so the template's built-in secure
+		-- right-click handler (UseContainerItem) remains intact.
+		overlayButton:SetScript("OnReceiveDrag", function()
+			local destButton = inv._lastHoveredItemButton
+			if destButton and _G.CursorHasItem() then
+				local savedThis = _G.this
+				_G.this = destButton
+				inv:ItemButton_OnClick("LeftButton", true)
+				_G.this = savedThis
+			end
+		end)
 
 		self.secureRightClickOverlay = overlayButton
 		self.secureRightClickBagFrame = overlayBagFrame
 	end
 
-	-- Add scripts.
+	-- All uiFrame scripts are registered without the WotLK shim wrapper using
+	-- BagshuiSetScriptRaw. The shim writes to _G.this/_G.arg* globals which
+	-- permanently taints the frame, preventing Show()/Hide() during combat.
+	-- These handlers use explicit WotLK-style parameters instead.
+	local _setScript = _G.BagshuiSetScriptRaw or uiFrame.SetScript
 
 	uiFrame.bagshuiData.lastDirtyCheck = _G.GetTime()
-	uiFrame:SetScript("OnUpdate", function()
+	_setScript(uiFrame, "OnUpdate", function()
+		-- On WotLK, Update() called from inside OnShow sees IsVisible()=false for child
+		-- frames. Fire a deferred update on the next frame after OnShow completes.
+		if uiFrame.bagshuiData.pendingUpdate then
+			uiFrame.bagshuiData.pendingUpdate = false
+			self:Update()
+		end
 		-- Mark this window as dirty if any "child" windows are open.
-		if _G.GetTime() - _G.this.bagshuiData.lastDirtyCheck > 0.075 then
-			_G.this.bagshuiData.dirty = Bagshui:ChildWindowsVisible()
-			_G.this.bagshuiData.lastDirtyCheck = _G.GetTime()
+		if _G.GetTime() - uiFrame.bagshuiData.lastDirtyCheck > 0.075 then
+			uiFrame.bagshuiData.dirty = Bagshui:ChildWindowsVisible()
+			uiFrame.bagshuiData.lastDirtyCheck = _G.GetTime()
+		end
+	end)
+
+	-- Deferred visibility ticker: Show()/Hide() called directly from a hooked
+	-- global (ToggleBag etc.) runs in the keybinding's execution thread. On WotLK,
+	-- if anything in that thread ever touched a protected function, the thread is
+	-- tainted and uiFrame:Show() is blocked in combat. By deferring Show()/Hide()
+	-- to a plain frame's OnUpdate we break out of that thread entirely.
+	-- nil = no pending action, "show" = show next tick, "hide" = hide next tick.
+	self.pendingVisibility = nil
+	local visibilityTicker = CreateFrame("Frame")
+	visibilityTicker:SetScript("OnUpdate", function()
+		local action = self.pendingVisibility
+		if action == nil then return end
+		self.pendingVisibility = nil
+		if action == "show" then
+			self.uiFrame:Show()
+			self.uiFrame:Raise()
+			self:SetDockedToFrameVisibility(BS_INVENTORY_UI_VISIBILITY_ACTION.OPEN)
+		elseif action == "hide" then
+			self.uiFrame:Hide()
 		end
 	end)
 
 	local oldOnShow = uiFrame:GetScript("OnShow")
-	uiFrame:SetScript("OnShow", function()
+	_setScript(uiFrame, "OnShow", function()
 		self:UiFrame_OnShow()
 		if oldOnShow then
 			oldOnShow()
 		end
 	end)
 	local oldOnHide = uiFrame:GetScript("OnHide")
-	uiFrame:SetScript("OnHide", function()
+	_setScript(uiFrame, "OnHide", function()
 		self:UiFrame_OnHide()
 		if oldOnHide then
 			oldOnHide()
@@ -122,13 +187,13 @@ function Inventory:InitUi()
 		self.clickedOnce = nil
 	end
 
-	uiFrame:SetScript("OnMouseDown", function()
+	_setScript(uiFrame, "OnMouseDown", function(_, btn)
 		-- Clear a pending item sale.
 		if self.itemPendingSale then
 			self:ClearItemPendingSale()
 		end
 
-		if _G.arg1 == "LeftButton" then
+		if btn == "LeftButton" then
 			-- Close non-Settings menus on left mouse down (Settings is closed OnMouseUp).
 			if not self.menus:IsMenuOpen("Settings") then
 				Bagshui:CloseMenus()
@@ -182,8 +247,6 @@ function Inventory:InitUi()
 						end
 					end
 					self.ignoreNextSettingChange = true
-					-- self.settings.showHeader = not self.settings.showHeader
-					-- self.settings.showFooter = self.settings.showHeader
 					self:Update()
 				end
 			end
@@ -191,7 +254,7 @@ function Inventory:InitUi()
 			self.clickedOnce = true
 			Bagshui:QueueEvent(resetClick, 0.25)
 
-		elseif _G.arg1 == "RightButton" then
+		elseif btn == "RightButton" then
 			-- Show right-click menu.
 			Bagshui:HideTooltips()
 			self.ui.tooltips.mini:Hide()
@@ -199,7 +262,7 @@ function Inventory:InitUi()
 		end
 	end)
 
-	uiFrame:SetScript("OnMouseUp", function()
+	_setScript(uiFrame, "OnMouseUp", function()
 		-- Only close Settings menu on mouse up so window can be dragged without closing it.
 		-- (All other menus are closed OnMouseDown).
 		if self.menus:IsMenuOpen("Settings") then
@@ -212,15 +275,14 @@ function Inventory:InitUi()
 
 	-- Util.CreateWindowFrame() sets default handlers for these to make window dragging
 	-- worked, but Inventory windows need their own handlers due to docking.
-    uiFrame:SetScript("OnDragStart", function()
+	_setScript(uiFrame, "OnDragStart", function()
 		self:UiFrame_OnDragStart()
 	end)
-	uiFrame:SetScript("OnDragStop", function()
+	_setScript(uiFrame, "OnDragStop", function()
 		self:UiFrame_OnDragStop()
 	end)
 
-
-	uiFrame:SetScript("OnEnter", function()
+	_setScript(uiFrame, "OnEnter", function()
 		-- If the cursor was holding an item in Edit Mode and left the window,
 		-- OnLeave would have hidden it, so bring it back.
 		self:ShowEditModeCursor()
@@ -230,10 +292,10 @@ function Inventory:InitUi()
 		_G.UIDropDownMenu_StopCounting(_G.DropDownList1)
 	end)
 
-	uiFrame:SetScript("OnLeave", function()
+	_setScript(uiFrame, "OnLeave", function(frame)
 		-- Edit Mode actions are Inventory class instance-specific, so it makes sense to
 		-- turn the cursor back to normal when it leaves the window.
-		if not _G.MouseIsOver(_G.this) then
+		if not _G.MouseIsOver(frame) then
 			self:HideEditModeCursor()
 		end
 	end)
@@ -771,24 +833,73 @@ function Inventory:InitUi()
 	frames.bottomRightToolbarAnchor:SetPoint("RIGHT", footer, "RIGHT", 5, 0)
 
 	-- Money frame.
+	-- Custom implementation instead of SmallMoneyFrameTemplate to avoid taint issues
+	-- and MoneyFrame_Update incompatibility on WotLK private servers.
 
 	local moneyFrameName = ui:CreateElementName("Money")
 	frames.money = _G.CreateFrame(
 		"Frame",
-		ui:CreateElementName("Money"),
-		footer,
-		"SmallMoneyFrameTemplate"
+		moneyFrameName,
+		footer
 	)
+
+	-- Create coin icon textures and text labels for gold, silver, copper.
+	-- Layout: [goldText goldIcon] [silverText silverIcon] [copperText copperIcon]
+	-- Built left-to-right: gold first (leftmost), copper last (rightmost).
+	local coinTypes = { "gold", "silver", "copper" }
+	local coinIcons = {
+		gold   = "Interface\\MoneyFrame\\UI-GoldIcon",
+		silver = "Interface\\MoneyFrame\\UI-SilverIcon",
+		copper = "Interface\\MoneyFrame\\UI-CopperIcon",
+	}
+	local moneyTexts = {}
+	local moneyIcons = {}
+	local prevAnchor = nil
+	for i = 1, #coinTypes do
+		local coinType = coinTypes[i]
+		-- Text label.
+		local text = frames.money:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		text:SetJustifyH("RIGHT")
+		-- Coin icon (to the right of the text).
+		local icon = frames.money:CreateTexture(nil, "ARTWORK")
+		icon:SetWidth(13)
+		icon:SetHeight(13)
+		icon:SetTexture(coinIcons[coinType])
+		-- Position left-to-right.
+		if not prevAnchor then
+			-- Leftmost coin (gold): anchor text to money frame's left edge.
+			text:SetPoint("LEFT", frames.money, "LEFT", 0, 0)
+		else
+			-- Anchor text to the right of the previous icon, with spacing.
+			text:SetPoint("LEFT", prevAnchor, "RIGHT", 4, 0)
+		end
+		icon:SetPoint("LEFT", text, "RIGHT", 1, 0)
+		moneyTexts[coinType] = text
+		moneyIcons[coinType] = icon
+		prevAnchor = icon  -- Next coin anchors to the right of this icon.
+	end
+
 	frames.money.bagshuiData = {
 		name = moneyFrameName,
-		texts = {
-			gold = _G[moneyFrameName .. "GoldButtonText"],
-			silver = _G[moneyFrameName .. "SilverButtonText"],
-			copper = _G[moneyFrameName .. "CopperButtonText"],
-		},
-		autoLayoutXOffset = 12
+		texts = moneyTexts,
+		icons = moneyIcons,
+		autoLayoutXOffset = 12,
+		-- Custom update function replaces MoneyFrame_Update.
+		updateMoney = function()
+			local money = _G.GetMoney() or 0
+			local gold = math.floor(money / 10000)
+			local silver = math.floor((money % 10000) / 100)
+			local copper = money % 100
+			moneyTexts.gold:SetText(tostring(gold))
+			moneyTexts.silver:SetText(tostring(silver))
+			moneyTexts.copper:SetText(tostring(copper))
+		end,
 	}
-	frames.money:SetWidth(22)
+	-- Fixed width large enough for up to 6-digit gold (999,999g 99s 99c).
+	-- Content is anchored left-to-right from the frame's LEFT edge, so
+	-- the leftmost element (gold text) never overflows past buttons to
+	-- the left. Extra width on the right is harmless (toward the edge).
+	frames.money:SetWidth(110)
 	frames.money:SetHeight(25)
 	frames.money:SetPoint("RIGHT", 8, 0)
 
@@ -810,20 +921,6 @@ function Inventory:InitUi()
 			_G.GameTooltip:Hide()
 		end
 	end)
-
-	local function moneyFrameOnEnter()
-		frames.money:GetScript("OnEnter")()
-	end
-	local function moneyFrameOnLeave()
-		frames.money:GetScript("OnLeave")()
-	end
-
-	for _, child in ipairs({frames.money:GetChildren()}) do
-		if child.HasScript and child:HasScript("OnEnter") then
-			child:SetScript("OnEnter", moneyFrameOnEnter)
-			child:SetScript("OnLeave", moneyFrameOnLeave)
-		end
-	end
 
 
 
@@ -882,6 +979,12 @@ function Inventory:InitUi()
 	end
 
 
+	-- Clam, Disenchant, and PickLock buttons are skipped on WotLK 3.3.5.
+	-- Creating SecureActionButtonTemplate buttons (even parented to UIParent)
+	-- taints the execution context via SetScript calls, which blocks
+	-- uiFrame:Show() in combat. These buttons are not available on WotLK.
+	if false then
+
 	-- Clam (open container) button.
 	buttons.toolbar.clam = ui:CreateIconButton({
 		name = "Clam",
@@ -892,16 +995,8 @@ function Inventory:InitUi()
 		disable = false,
 		texture = "Clam",
 		tooltipTitle = L.OpenContainer,
-		onClick = function()
-			if
-				self.nextOpenableItemBagNum
-				and self.nextOpenableItemSlotNum
-			then
-				_G.UseContainerItem(self.nextOpenableItemBagNum, self.nextOpenableItemSlotNum)
-			end
-		end,
+		template = "SecureActionButtonTemplate",
 		onEnter = function()
-			-- Actual work will be handled in OnUpdate.
 			_G.this.bagshuiData.mouseIsOver = true
 		end,
 		onLeave = function()
@@ -918,10 +1013,6 @@ function Inventory:InitUi()
 		end,
 		onUpdate = function()
 			if not _G.this.bagshuiData.mouseIsOver then
-				-- We need to essentially fake an OnLeave event when the
-				-- last container is opened because the normal OnLeave
-				-- won't fire, which leads to the light highlighted item
-				-- slot button thinking it's still moused over.
 				if _G.this.bagshuiData.wasUpdated then
 					_G.this.bagshuiData.wasUpdated = false
 				end
@@ -932,9 +1023,6 @@ function Inventory:InitUi()
 		end,
 	})
 
-
-	-- Disenchant and PickLock buttons (Bags only; Bank has these as false).
-	-- Use SecureActionButtonTemplate so CastSpell is called in a secure context.
 	if self.disenchantButton then
 		buttons.toolbar.disenchant = ui:CreateIconButton({
 			name = "Disenchant",
@@ -944,7 +1032,6 @@ function Inventory:InitUi()
 			anchorToPoint = "LEFT",
 			disable = false,
 			texture = "Disenchant",
-			-- No onClick: SecureActionButtonTemplate handles CastSpell without taint.
 			template = "SecureActionButtonTemplate",
 			onEnter = inventory_SpellButton_OnEnter,
 			onLeave = inventory_SpellButton_OnLeave,
@@ -953,7 +1040,6 @@ function Inventory:InitUi()
 		buttons.toolbar.disenchant.bagshuiData.spellName = L.Spell_Disenchant
 		buttons.toolbar.disenchant:SetAttribute("type", "spell")
 		buttons.toolbar.disenchant:SetAttribute("spell", L.Spell_Disenchant)
-		-- Close menus on click without tainting CastSpell (hook runs after secure action).
 		buttons.toolbar.disenchant:HookScript("OnClick", function(self)
 			ui:CloseMenusAndClearFocuses(true, true, false)
 		end)
@@ -961,7 +1047,6 @@ function Inventory:InitUi()
 	end
 
 	if self.pickLockButton then
-		-- Pick Lock button anchors to Disenchant if it exists, otherwise to clam.
 		local pickLockAnchorFrame = buttons.toolbar.disenchant or buttons.toolbar.clam
 		buttons.toolbar.pickLock = ui:CreateIconButton({
 			name = "PickLock",
@@ -971,7 +1056,6 @@ function Inventory:InitUi()
 			anchorToPoint = "LEFT",
 			disable = false,
 			texture = "PickLock",
-			-- No onClick: SecureActionButtonTemplate handles CastSpell without taint.
 			template = "SecureActionButtonTemplate",
 			onEnter = inventory_SpellButton_OnEnter,
 			onLeave = inventory_SpellButton_OnLeave,
@@ -986,6 +1070,8 @@ function Inventory:InitUi()
 		buttons.toolbar.pickLock:Hide()
 	end
 
+	end -- not Bagshui.isWotLK
+
 
 
 	-- Bottom right toolbar order, consumed by `Inventory:UpdateToolbarAnchoring()`
@@ -996,6 +1082,7 @@ function Inventory:InitUi()
 		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.clam,
 		buttons.toolbar.pickLock,
+		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.disenchant,
 		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.hearthstone,
@@ -1254,9 +1341,7 @@ function Inventory:UiFrame_OnShow()
 	-- Skip RescueWindow here: the window hasn't been laid out yet (Update() hasn't run),
 	-- so GetLeft()/GetRight() reflect stale geometry and would cause false rescues.
 	self:ApplyWindowPosition(true)
-	-- Do NOT use QueueUpdate() here.
-	-- Do NOT use QueueUpdate() here.
-	self:Update()
+	self.uiFrame.bagshuiData.pendingUpdate = true
 	self._onShowInProgress = false
 end
 
@@ -1276,8 +1361,8 @@ function Inventory:UiFrame_OnHide()
 	self:CloseMenusAndClearFocuses()
 	self:ClearEditModeCursor()
 	self:SetCharacter(Bagshui.currentCharacterId)
-	-- Hide the secure right-click overlay.
-	if self.secureRightClickOverlay then
+	-- Hide the secure right-click overlay (skip during combat to avoid taint).
+	if self.secureRightClickOverlay and not (_G.InCombatLockdown and _G.InCombatLockdown()) then
 		self.secureRightClickOverlay:Hide()
 	end
 
@@ -1322,7 +1407,6 @@ function Inventory:UiFrame_OnDragStop()
 		self:FixSettingsMenuPosition()
 		self:NotifySkinOfPositionChange()
 	end
-end
 end
 
 
@@ -1478,9 +1562,6 @@ end
 --- Display the window.
 function Inventory:Open()
 	if not self.uiFrame:IsVisible() then
-		-- Set to `EVENT_PREFIX_` when the event ends in `_OPENED`.
-		-- This will allow for matching against the corresponding
-		-- `EVENT_PREFIX_CLOSED`.
 		self.lastOpenEventTrigger =
 			_G.event
 			and (
@@ -1489,9 +1570,9 @@ function Inventory:Open()
 			)
 			or nil
 	end
-	self.uiFrame:Show()
-	self.uiFrame:Raise()
-	self:SetDockedToFrameVisibility(BS_INVENTORY_UI_VISIBILITY_ACTION.OPEN)
+	-- Defer Show() to a ticker OnUpdate so it runs outside the hook call chain,
+	-- avoiding WotLK taint that blocks protected frame calls in combat.
+	self.pendingVisibility = "show"
 end
 
 
@@ -1511,7 +1592,8 @@ function Inventory:Close()
 		then
 			return
 		end
-		self.uiFrame:Hide()
+		-- Defer Hide() for the same reason as Show() in Open().
+		self.pendingVisibility = "hide"
 	end
 end
 
@@ -1519,7 +1601,8 @@ end
 
 --- Open if closed, close if opened.
 function Inventory:Toggle(keepDockedToFrameOpen)
-	if self.uiFrame:IsVisible() then
+	if self.uiFrame:IsVisible() or self.pendingVisibility == "show" then
+		self.pendingVisibility = nil  -- cancel any pending show
 		self:Close()
 		if not keepDockedToFrameOpen then
 			self:SetDockedToFrameVisibility(BS_INVENTORY_UI_VISIBILITY_ACTION.CLOSE)
@@ -1602,15 +1685,11 @@ end
 --- to re-run ClearAllPoints+SetPoint and jump the window).
 ---@param noRescueAttempts boolean?
 function Inventory:ApplyWindowPosition(noRescueAttempts)
-	local effectiveScale = self.uiFrame:GetEffectiveScale()
+	local anchorPoint = self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint
+	local offX = self.settings.windowAnchorXOffset
+	local offY = self.settings.windowAnchorYOffset
 	self.uiFrame:ClearAllPoints()
-	self.uiFrame:SetPoint(
-		self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint,
-		_G.UIParent,
-		self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint,
-		self.settings.windowAnchorXOffset / effectiveScale,
-		self.settings.windowAnchorYOffset / effectiveScale
-	)
+	self.uiFrame:SetPoint(anchorPoint, offX, offY)
 	self:FixSettingsMenuPosition()
 	if not noRescueAttempts then
 		self:RescueWindow()
@@ -1704,24 +1783,22 @@ end
 
 
 --- Calculate the current window offset from the given point.
---- The returned value is in screen pixels so that it can be converted back to
---- frame-relative coordinates in ApplyWindowPosition by dividing by frameScale.
+--- Matches Bagnon's approach: use GetLeft/Bottom/Right/Top divided by the frame's
+--- own scale (NOT effectiveScale) so values are in UIParent coordinate space.
+--- ApplyWindowPosition restores with no scale conversion.
 ---@param point string LEFT/RIGHT/TOP/BOTTOM
 ---@return number
 function Inventory:GetWindowOffset(point)
-	-- GetLeft/Right/Top/Bottom return values in the frame's coordinate system.
-	-- Multiply by effective scale (not just frame scale) to get screen pixels,
-	-- because effective scale = UIParent:GetScale() * frame:GetScale().
-	local effectiveScale = self.uiFrame:GetEffectiveScale()
-	local offset =
-		self.uiFrame["Get" .. BsUtil.Capitalize(point)](self.uiFrame)
-		* effectiveScale
+	local s = self.uiFrame:GetScale()
+	local parent = self.uiFrame:GetParent()
+	local offset = self.uiFrame["Get" .. BsUtil.Capitalize(point)](self.uiFrame)
 
-	if string.upper(point) == "RIGHT" or string.upper(point) == "TOP" then
-		local dimension = (string.upper(point) == "RIGHT") and "Width" or "Height"
-		-- UIParent dimensions in screen pixels = GetWidth() * GetScale().
-		local parentSize = _G.UIParent["Get" .. dimension](_G.UIParent) * _G.UIParent:GetScale()
-		offset = -(parentSize - offset)
+	if string.upper(point) == "RIGHT" then
+		local w = parent:GetWidth() / s
+		offset = offset - w
+	elseif string.upper(point) == "TOP" then
+		local h = parent:GetHeight() / s
+		offset = offset - h
 	end
 
 	return offset

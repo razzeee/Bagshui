@@ -1090,19 +1090,20 @@ end
 
 
 --- Call the entry frame OnEnter again when modifier key states change so tooltips can be refreshed if needed.
-local function ScrollableListEntryFrame_OnUpdate()
-	if not _G.this.bagshuiData.mouseIsOver then
+local function ScrollableListEntryFrame_OnUpdate(self)
+	self = self or _G.this
+	if not self.bagshuiData.mouseIsOver then
 		return
 	end
 	if
-		_G.this.bagshuiData.altKeyState ~= _G.IsAltKeyDown()
-		or _G.this.bagshuiData.controlKeyState ~= _G.IsControlKeyDown()
-		or _G.this.bagshuiData.shiftKeyState ~= _G.IsShiftKeyDown()
+		self.bagshuiData.altKeyState ~= _G.IsAltKeyDown()
+		or self.bagshuiData.controlKeyState ~= _G.IsControlKeyDown()
+		or self.bagshuiData.shiftKeyState ~= _G.IsShiftKeyDown()
 	then
-		ScrollableListEntryFrame_OnEnter(_G.this, false, true)
-		_G.this.bagshuiData.altKeyState = _G.IsAltKeyDown()
-		_G.this.bagshuiData.controlKeyState = _G.IsControlKeyDown()
-		_G.this.bagshuiData.shiftKeyState = _G.IsShiftKeyDown()
+		ScrollableListEntryFrame_OnEnter(self, false, true)
+		self.bagshuiData.altKeyState = _G.IsAltKeyDown()
+		self.bagshuiData.controlKeyState = _G.IsControlKeyDown()
+		self.bagshuiData.shiftKeyState = _G.IsShiftKeyDown()
 	end
 end
 

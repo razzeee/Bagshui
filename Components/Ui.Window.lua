@@ -283,7 +283,10 @@ function Ui:CreateCloseButton(name, windowFrame, anchor, xOffset, yOffset, click
 		end
 
 		if clickFunction then
-			closeButton:SetScript("OnClick", clickFunction)
+			-- Use raw SetScript so the OnClick doesn't taint the execution context,
+			-- which would block Show()/Hide() on the parent window during combat.
+			local _setScript = _G.BagshuiSetScriptRaw or closeButton.SetScript
+			_setScript(closeButton, "OnClick", clickFunction)
 		end
 	end
 

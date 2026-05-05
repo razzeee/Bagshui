@@ -143,7 +143,11 @@ function Menus:Init()
 			-- Record the value of the clicked menu item on our hack frame so that UIDropDownMenu_Refresh knows what to do.
 			self.autoSplitMenuRefreshHackFrame.selectedValue = (not params.menuItem.notCheckable) and params.menuItem.value or nil
 			-- Call UIDropDownMenu_Refresh on the next frame to put the check mark back if it was removed.
-			Bagshui:QueueEvent(_G.UIDropDownMenu_Refresh, nil, true, self.autoSplitMenuRefreshHackFrame)
+			-- Wrapped in pcall via a lambda to avoid crashing if UIDropDownMenu_Refresh has an
+			-- unexpected signature on this server (cosmetic only -- menu still works without it).
+			Bagshui:QueueEvent(function()
+				pcall(_G.UIDropDownMenu_Refresh, self.autoSplitMenuRefreshHackFrame)
+			end, nil, true)
 		else
 			Bagshui:CloseMenus()
 		end
@@ -370,7 +374,13 @@ function Menus:ShowMenu(menuType, anchorFrame, xOffset, yOffset, anchorPoint, an
 	Bagshui.menuFrame.bagshuiData.lastMenuTypeLoaded = menuType .. tostring(self)
 
 	-- Force re-initialization of menus to avoid the "Too many buttons in UIDropDownMenu:" error.
-	_G.UIDROPDOWNMENU_OPEN_MENU = nil
+	-- Only clear if it's currently Bagshui's menu (or nil) to avoid disrupting other addons.
+	if not _G.UIDROPDOWNMENU_OPEN_MENU
+		or _G.UIDROPDOWNMENU_OPEN_MENU == Bagshui.menuFrame.bagshuiData.name
+		or _G.UIDROPDOWNMENU_OPEN_MENU == Bagshui.menuFrame:GetName()
+	then
+		_G.UIDROPDOWNMENU_OPEN_MENU = nil
+	end
 
 	-- Reset menu properties to prevent spurious check marks from appearing (weird Blizzard issue).
 	Bagshui.menuFrame.selectedID = nil

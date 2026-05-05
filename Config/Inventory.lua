@@ -63,14 +63,21 @@ Bagshui.config.Inventory = {
 		},
 
 		apiFunctionsToHook = {
+			-- Open/Toggle bag functions are replaced directly (like Bagnon/AdiBags) so
+			-- that the original never runs and native ContainerFrames never open.
+			-- This avoids all taint issues: our Show()/Hide() calls are untainted because
+			-- we never called any protected frame method before them.
+			-- CloseBackpack/CloseBag are intentionally NOT hooked: ElvUI calls them as
+			-- side effects of its own bag management, which would immediately close Bagshui.
 			OpenAllBags = "ToggleBag",
 			OpenBackpack = "OpenBag",
 			OpenBag = "OpenBag",
-			CloseBackpack = "CloseBag",
-			CloseBag = "CloseBag",
 			ToggleBackpack = "ToggleBag",
 			ToggleBag = "ToggleBag",
 		},
+
+		-- No longer needed: hooks moved to apiFunctionsToHook (direct replacement).
+		apiFunctionsToHookSecure = nil,
 
 		opensViaHooks = true,
 		keyBindingPrefix = "TOGGLEBAG",

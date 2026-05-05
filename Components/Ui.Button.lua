@@ -317,6 +317,10 @@ function Ui:CreateIconButton(buttonOpts)
 		button.bagshuiData.yOffset
 	)
 
+	-- Use raw SetScript to avoid the WotLK shim writing _G.this, which would
+	-- taint the execution context and block Show()/Hide() during combat.
+	local _setScript = _G.BagshuiSetScriptRaw or button.SetScript
+
 	-- Tooltip management.
 	if buttonOpts.tooltipTitle or buttonOpts.tooltipFunction then
 		-- Allow tooltip delays to be handled per-button.
@@ -324,18 +328,18 @@ function Ui:CreateIconButton(buttonOpts)
 			buttonOpts.tooltipGroupElement = button
 		end
 
-		button:SetScript("OnEnter", function()
-			_G.this.bagshuiData.mouseIsOver = true
-			self:ShowIconButtonTooltip(_G.this)
+		_setScript(button, "OnEnter", function()
+			button.bagshuiData.mouseIsOver = true
+			self:ShowIconButtonTooltip(button)
 		end)
 
-		button:SetScript("OnLeave", function()
-			_G.this.bagshuiData.mouseIsOver = false
-			if BsIconButtonTooltip:IsOwned(_G.this) then
-				Bagshui:ShortenTooltipDelay(_G.this, true)
+		_setScript(button, "OnLeave", function()
+			button.bagshuiData.mouseIsOver = false
+			if BsIconButtonTooltip:IsOwned(button) then
+				Bagshui:ShortenTooltipDelay(button, true)
 				BsIconButtonTooltip:Hide()
 			end
-			_G.this.bagshuiData.keepTooltipVisible = nil
+			button.bagshuiData.keepTooltipVisible = nil
 		end)
 	end
 
@@ -344,7 +348,7 @@ function Ui:CreateIconButton(buttonOpts)
 		-- Capture onClick function so table reuse doesn't bite us.
 		local onClick = buttonOpts.onClick
 		local onClickBeforeCloseMenusAndClearFocuses = buttonOpts.onClickBeforeCloseMenusAndClearFocuses
-		button:SetScript("OnClick", function()
+		_setScript(button, "OnClick", function()
 			if onClickBeforeCloseMenusAndClearFocuses then
 				onClickBeforeCloseMenusAndClearFocuses()
 			end
@@ -352,17 +356,17 @@ function Ui:CreateIconButton(buttonOpts)
 			onClick()
 		end)
 		-- Shift/unshift HighlightTexture to match pushed/normal texture on mousedown/mouseup.
-		button:SetScript("OnMouseDown", function()
-			if not _G.this.bagshuiData.highlightTexture then
-				_G.this.bagshuiData.highlightTexture = _G.this:GetHighlightTexture()
+		_setScript(button, "OnMouseDown", function()
+			if not button.bagshuiData.highlightTexture then
+				button.bagshuiData.highlightTexture = button:GetHighlightTexture()
 			end
-			_G.this.bagshuiData.highlightTexture:ClearAllPoints()
-			_G.this.bagshuiData.highlightTexture:SetPoint("TOPLEFT", _G.this, "TOPLEFT", 0, -0.5)
-			_G.this.bagshuiData.highlightTexture:SetPoint("BOTTOMRIGHT", _G.this, "BOTTOMRIGHT", 0, -0.5)
+			button.bagshuiData.highlightTexture:ClearAllPoints()
+			button.bagshuiData.highlightTexture:SetPoint("TOPLEFT", button, "TOPLEFT", 0, -0.5)
+			button.bagshuiData.highlightTexture:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, -0.5)
 		end)
-		button:SetScript("OnMouseUp", function()
-			_G.this.bagshuiData.highlightTexture:ClearAllPoints()
-			_G.this.bagshuiData.highlightTexture:SetAllPoints(_G.this)
+		_setScript(button, "OnMouseUp", function()
+			button.bagshuiData.highlightTexture:ClearAllPoints()
+			button.bagshuiData.highlightTexture:SetAllPoints(button)
 		end)
 	end
 	if buttonOpts.mouseButtons then
@@ -374,7 +378,7 @@ function Ui:CreateIconButton(buttonOpts)
 	-- Set up other scripts.
 	if buttonOpts.onEnter then
 		local oldOnEnter = button:GetScript("OnEnter")
-		button:SetScript("OnEnter", function()
+		_setScript(button, "OnEnter", function()
 			if buttonOpts.onEnter() ~= false and oldOnEnter then
 				oldOnEnter()
 			end
@@ -382,7 +386,7 @@ function Ui:CreateIconButton(buttonOpts)
 	end
 	if buttonOpts.onLeave then
 		local oldOnLeave = button:GetScript("OnLeave")
-		button:SetScript("OnLeave", function()
+		_setScript(button, "OnLeave", function()
 			if buttonOpts.onLeave() ~= false and oldOnLeave then
 				oldOnLeave()
 			end
@@ -390,15 +394,16 @@ function Ui:CreateIconButton(buttonOpts)
 	end
 
 	if buttonOpts.onShow then
-		button:SetScript("OnShow", buttonOpts.onShow)
+		_setScript(button, "OnShow", buttonOpts.onShow)
 	end
 	if buttonOpts.onHide then
-		button:SetScript("OnHide", buttonOpts.onHide)
+		_setScript(button, "OnHide", buttonOpts.onHide)
 	end
 
-	button:SetScript("OnUpdate", function()
-		if _G.this.bagshuiData and _G.this.bagshuiData.isOnCooldown then
-			self:UpdateIconButtonCooldown(_G.this)
+	button:SetScript("OnUpdate", function(btn)
+		btn = btn or _G.this
+		if btn.bagshuiData and btn.bagshuiData.isOnCooldown then
+			self:UpdateIconButtonCooldown(btn)
 		end
 		if buttonOpts.onUpdate then
 			buttonOpts.onUpdate()
@@ -599,23 +604,22 @@ local iconButton_ShineFrame_OnUpdate_alpha
 
 --- Shrink and fade the "cooldown finished" shine, eventually hiding it once the animation is done.
 --- Credit: https://github.com/anzz1/OmniCC/blob/master/OmniCC.lua
-local function IconButton_ShineFrame_OnUpdate()
+local function IconButton_ShineFrame_OnUpdate(self)
+	self = self or _G.this
 	-- Control animation speed.
-	if _G.GetTime() - (_G.this.bagshuiData.lastShineUpdate or 0) < 0.1 then
+	if _G.GetTime() - (self.bagshuiData.lastShineUpdate or 0) < 0.1 then
 		return
 	end
 
-	iconButton_ShineFrame_OnUpdate_alpha = _G.this.bagshuiData.shine:GetAlpha()
-	_G.this.bagshuiData.shine:SetAlpha(iconButton_ShineFrame_OnUpdate_alpha * 0.95)
+	iconButton_ShineFrame_OnUpdate_alpha = self.bagshuiData.shine:GetAlpha()
+	self.bagshuiData.shine:SetAlpha(iconButton_ShineFrame_OnUpdate_alpha * 0.95)
 
 	if iconButton_ShineFrame_OnUpdate_alpha < 0.1 then
-		-- Animation is done, so hide the shine.
-		_G.this:Hide()
+		self:Hide()
 	else
-		-- Shrink the shine as the alpha value decreases.
-		_G.this.bagshuiData.shine:SetHeight(iconButton_ShineFrame_OnUpdate_alpha * _G.this:GetHeight() * ICON_BUTTON_SHINE_SCALE)
-		_G.this.bagshuiData.shine:SetWidth(iconButton_ShineFrame_OnUpdate_alpha * _G.this:GetWidth() * ICON_BUTTON_SHINE_SCALE)
-		_G.this.bagshuiData.lastShineUpdate = _G.GetTime()
+		self.bagshuiData.shine:SetHeight(iconButton_ShineFrame_OnUpdate_alpha * self:GetHeight() * ICON_BUTTON_SHINE_SCALE)
+		self.bagshuiData.shine:SetWidth(iconButton_ShineFrame_OnUpdate_alpha * self:GetWidth() * ICON_BUTTON_SHINE_SCALE)
+		self.bagshuiData.lastShineUpdate = _G.GetTime()
 	end
 end
 

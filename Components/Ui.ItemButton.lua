@@ -138,19 +138,20 @@ end
 
 
 -- Default OnUpdate for standalone item buttons to refresh tooltips when modifier keys are pressed/released.
-local function ItemButton_OnUpdate()
-	if not _G.this.bagshuiData.mouseIsOver then
+local function ItemButton_OnUpdate(self)
+	self = self or _G.this
+	if not self.bagshuiData.mouseIsOver then
 		return
 	end
 	if
-		_G.this.bagshuiData.altKeyState ~= _G.IsAltKeyDown()
-		or _G.this.bagshuiData.controlKeyState ~= _G.IsControlKeyDown()
-		or _G.this.bagshuiData.shiftKeyState ~= _G.IsShiftKeyDown()
+		self.bagshuiData.altKeyState ~= _G.IsAltKeyDown()
+		or self.bagshuiData.controlKeyState ~= _G.IsControlKeyDown()
+		or self.bagshuiData.shiftKeyState ~= _G.IsShiftKeyDown()
 	then
-		ItemButton_OnEnter(_G.this, nil, true)
-		_G.this.bagshuiData.altKeyState = _G.IsAltKeyDown()
-		_G.this.bagshuiData.controlKeyState = _G.IsControlKeyDown()
-		_G.this.bagshuiData.shiftKeyState = _G.IsShiftKeyDown()
+		ItemButton_OnEnter(self, nil, true)
+		self.bagshuiData.altKeyState = _G.IsAltKeyDown()
+		self.bagshuiData.controlKeyState = _G.IsControlKeyDown()
+		self.bagshuiData.shiftKeyState = _G.IsShiftKeyDown()
 	end
 end
 

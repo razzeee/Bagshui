@@ -18,7 +18,6 @@ local update_cascadeInventory
 --- This is the main workhorse for orchestrating UI changes; it's called when almost anything happens.
 ---@param cascade boolean? After completing the update process for this inventory, trigger it for any docked inventory.
 function Inventory:Update(cascade)
-	-- self:PrintDebug(string.format("Update() windowUpdateBlocked=%s", tostring(self.windowUpdateBlocked)))
 
 	-- Only update if we haven't been blocked from doing so.
 	-- One of the main reasons this can happen is when the window is being dragged --
@@ -59,10 +58,10 @@ function Inventory:Update(cascade)
 
 	-- Perform all updates in the necessary order.
 	self:ValidateLayout()
-	self:ManageDryRun(true)  -- First call decides whether we're in dry run mode (`self.dryRun`).
+	self:ManageDryRun(true)
 	self:UpdateLayoutLookupTables()
 	self:CategorizeAndSort()
-	self:ManageDryRun(false)  -- Second call re-points lookup tables if needed and sets `self.enableResortIcon`.
+	self:ManageDryRun(false)
 	self:FindSpecialItems()
 	self:UpdateWindow()
 	self:UpdateBagBar()
@@ -1198,7 +1197,6 @@ function Inventory:UpdateWindow()
 			self:FixWindowPosition(true)
 		end
 	end
-
 	-- Check for mouse over state for interact-able elements to ensure tooltips stay current.
 	Bagshui:QueueClassCallback(self, self.ItemSlotAndGroupMouseOverCheck)
 
@@ -2133,10 +2131,10 @@ function Inventory:UpdateToolbar()
 		for _, text in pairs(self.ui.frames.money.bagshuiData.texts) do
 			text:SetTextColor(self.settings.groupLabelDefault[1], self.settings.groupLabelDefault[2], self.settings.groupLabelDefault[3], self.settings.groupLabelDefault[4])
 		end
-		-- Force money frame update every toolbar refresh so its width is correct
-		-- before UpdateToolbarAnchoring() chains button positions off it.
-		if _G.MoneyFrame_Update then
-			pcall(_G.MoneyFrame_Update, self.ui.frames.money)
+		-- Update money display using our custom implementation (avoids
+		-- SmallMoneyFrameTemplate taint and MoneyFrame_Update issues on WotLK).
+		if self.ui.frames.money.bagshuiData.updateMoney then
+			self.ui.frames.money.bagshuiData.updateMoney()
 		end
 	else
 		self.ui.frames.money:Hide()
@@ -2160,6 +2158,19 @@ function Inventory:UpdateToolbar()
 	end
 
 	-- Clam (open container) button.
+	-- Update the secure "item" attribute so the hardware click uses UseContainerItem
+	-- on the correct slot. SetAttribute is blocked during combat, but the clam
+	-- button is also disabled then, so this is fine.
+	if
+		toolbarButtons.clam
+		and self.nextOpenableItemBagNum
+		and self.nextOpenableItemSlotNum
+		and not (_G.InCombatLockdown and _G.InCombatLockdown())
+	then
+		toolbarButtons.clam:SetAttribute("type", "item")
+		toolbarButtons.clam:SetAttribute("bag", self.nextOpenableItemBagNum)
+		toolbarButtons.clam:SetAttribute("slot", self.nextOpenableItemSlotNum)
+	end
 	self:SetToolbarButtonState(
 		toolbarButtons.clam,
 		(
@@ -2266,16 +2277,26 @@ function Inventory:SetToolbarButtonState(
 )
 	if not button then return end
 
+	-- During combat, modifying secure frames (SecureActionButtonTemplate) causes
+	-- taint that blocks the entire parent frame from receiving input.
+	-- Skip Show/Hide/Enable/Disable on secure buttons while in combat.
+	local inCombat = _G.InCombatLockdown and _G.InCombatLockdown()
+	local isSecure = button.bagshuiData and button.bagshuiData.spellName
+
 	if visible == nil then
 		visible = true
 	end
-	button[visible and "Show" or "Hide"](button)
+	if not (inCombat and isSecure) then
+		button[visible and "Show" or "Hide"](button)
+	end
 
 	if button.Enable then
 		if enable == nil then
 			enable = true
 		end
-		button[enable and "Enable" or "Disable"](button)
+		if not (inCombat and isSecure) then
+			button[enable and "Enable" or "Disable"](button)
+		end
 	end
 
 	if button.LockHighlight then
@@ -2371,7 +2392,7 @@ function Inventory:ItemSlotAndGroupMouseOverCheck()
 		end
 	end
 	if self.editMode and not mouseOverFound then
-		for _, group in self.ui.frames.groups do
+		for _, group in ipairs(self.ui.frames.groups) do
 			if _G.MouseIsOver(group) and group:IsVisible() then
 				self:Group_OnEnter(group)
 			end

@@ -109,10 +109,10 @@ function Ui:CreateScrollFrame(name, parent, borderStyle)
 
 	-- Ensure ScrollChild width is kept in sync.
 	scrollFrame:SetScript("OnSizeChanged", function()
-		self:SetScrollChildWidth(_G.this)
+		self:SetScrollChildWidth(scrollFrame)
 	end)
 	scrollFrame:SetScript("OnShow", function()
-		self:SetScrollChildWidth(_G.this)
+		self:SetScrollChildWidth(scrollFrame)
 	end)
 
 	-- Allow clicking the ScrollFrame to close menus and de-focus fields.

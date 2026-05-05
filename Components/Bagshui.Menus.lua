@@ -80,6 +80,14 @@ local TOGGLE_DROPDOWN_MENU_SECOND_PASS = "BAGSHUI_TOGGLE_DROPDOWN_MENU_THIRD_PAS
 ---@param yOffset number? Parameter for the original `ToggleDropDownMenu()`.
 ---@param bagshuiAdditionalPassReason string? When another pass needs to be made to re-check the menu's position, this extra parameter is added.
 function Bagshui:ToggleDropDownMenu(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset, _, _, _, bagshuiAdditionalPassReason)
+	-- If this is not a Bagshui-initiated call and not one of our additional passes,
+	-- pass straight through to the original function without any Bagshui involvement.
+	local isBagshuiCall = bagshuiAdditionalPassReason ~= nil
+		or (self.menuFrame and dropDownFrame == self.menuFrame)
+	if not isBagshuiCall then
+		return self.hooks:OriginalHook(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset)
+	end
+
 	-- Record whether we're in one of the additional passes.
 	local phase = 0
 	if bagshuiAdditionalPassReason == TOGGLE_DROPDOWN_MENU_FIRST_PASS then
@@ -288,6 +296,12 @@ end
 function Bagshui:UIDropDownMenu_AddButton(wowApiFunctionName, menuItem, level)
 
 	self.hooks:OriginalHook(wowApiFunctionName, menuItem, level)
+
+	-- Only apply Bagshui-specific button styling for Bagshui menu items.
+	-- All Bagshui menu items have _bagshui=true set in Menus:AddMenuItem().
+	if not (menuItem and menuItem._bagshui) then
+		return
+	end
 
 
 	-- Grab info about current menu item.

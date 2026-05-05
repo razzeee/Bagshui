@@ -80,4 +80,34 @@ function Bagshui:OpenStackSplitFrame(wowApiFunctionName, maxStack, parent, ancho
 	end
 end
 
+
+
+-- UIDropDownMenu_Refresh compatibility shim.
+-- On WotLK this server's UIDropDownMenu_Refresh expects (dropdown, useValue, dropDownLevel).
+-- But Blizzard's internal DropDownList button OnClick calls UIDropDownMenu_Refresh(level)
+-- with just a number (1.12 calling convention). Wrap to handle both.
+-- Only applies the number->frame fixup when the currently open menu belongs to Bagshui,
+-- to avoid interfering with other addons' dropdowns.
+if _G.UIDropDownMenu_Refresh then
+	local _orig_UIDropDownMenu_Refresh = _G.UIDropDownMenu_Refresh
+	_G.UIDropDownMenu_Refresh = function(dropdownOrLevel, useValue, dropDownLevel)
+		if type(dropdownOrLevel) == "number"
+			and Bagshui
+			and Bagshui.menuFrame
+			and Bagshui.menuFrame.bagshuiData
+			and _G.UIDROPDOWNMENU_OPEN_MENU == Bagshui.menuFrame.bagshuiData.name
+		then
+			-- Old 1.12 call from within a Bagshui menu: UIDropDownMenu_Refresh(level)
+			-- Use the currently open menu frame and treat arg as level.
+			_orig_UIDropDownMenu_Refresh(
+				_G.UIDROPDOWNMENU_OPEN_MENU,
+				useValue,
+				dropdownOrLevel
+			)
+		else
+			_orig_UIDropDownMenu_Refresh(dropdownOrLevel, useValue, dropDownLevel)
+		end
+	end
+end
+
 end)

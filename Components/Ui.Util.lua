@@ -153,6 +153,10 @@ function Ui:PassMouseEventsThrough(source, dest, clickOnly)
 	if not (source and dest) then
 		return
 	end
+	-- Use raw SetScript to avoid the WotLK shim wrapper writing _G.this,
+	-- which would taint source and propagate up to the parent window frame,
+	-- blocking Show()/Hide() during combat.
+	local setScript = _G.BagshuiSetScriptRaw or source.SetScript
 	for _, event in ipairs(uiPassthroughEvents) do
 		if
 			(
@@ -166,7 +170,7 @@ function Ui:PassMouseEventsThrough(source, dest, clickOnly)
 			and source:HasScript(event)
 			and dest:HasScript(event)
 		then
-			source:SetScript(event, dest:GetScript(event))
+			setScript(source, event, dest:GetScript(event))
 		end
 	end
 end

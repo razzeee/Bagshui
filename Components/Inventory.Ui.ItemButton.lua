@@ -7,17 +7,19 @@ local InventoryUi = Bagshui.prototypes.InventoryUi
 
 --- Special OnHide for Inventory item slot buttons to also hide tooltips and
 --- the stack split frame.
-local function InventoryItemButton_OnHide()
+local function InventoryItemButton_OnHide(self)
 	-- oldOnHide was captured during button creation in CreateInventoryItemSlotButton().
-	_G.this.bagshuiData.oldOnHide()
+	-- Accept self as explicit param (WotLK) with fallback to _G.this (1.12 shim).
+	self = self or _G.this
+	self.bagshuiData.oldOnHide(self)
 
-	if BsInfoTooltip:IsOwned(_G.this) then
+	if BsInfoTooltip:IsOwned(self) then
 		BsInfoTooltip:Hide()
 	end
 
 	-- If the stack splitting frame is visible and owned by this inventory window, hide it.
 	-- (this.hasStackSplit is managed by Blizzard's FrameXML code).
-	if _G.this.hasStackSplit == 1 then
+	if self.hasStackSplit == 1 then
 		_G.StackSplitFrame:Hide()
 	end
 end
@@ -33,8 +35,8 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 
 	-- Wrapper functions so we can reference self.
 	if not inventory._itemSlotButton_ScriptWrapper_OnClick then
-		function inventory._itemSlotButton_ScriptWrapper_OnClick()
-			inventory:ItemButton_OnClick(_G.arg1)
+		function inventory._itemSlotButton_ScriptWrapper_OnClick(btn, mouseButton)
+			inventory:ItemButton_OnClick(mouseButton or _G.arg1)
 		end
 		function inventory._itemSlotButton_ScriptWrapper_OnDragStart()
 			inventory:ItemButton_OnClick("LeftButton", true)
@@ -44,8 +46,8 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 				inventory:ItemButton_OnClick("LeftButton", true)
 			end
 		end
-		function inventory._itemSlotButton_ScriptWrapper_OnUpdate()
-			inventory:ItemButton_OnUpdate(_G.arg1)
+		function inventory._itemSlotButton_ScriptWrapper_OnUpdate(btn, elapsed)
+			inventory:ItemButton_OnUpdate(elapsed or _G.arg1, btn or _G.this)
 		end
 		function inventory._itemSlotButton_ScriptWrapper_OnEnter()
 			inventory:ItemButton_OnEnter()
@@ -68,7 +70,13 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 			-- Right-click UseContainerItem is handled via Bagshui's own OnClick logic.
 			local slotButton = ui:CreateItemSlotButton(
 				"Item"..elementNum,
-				inventory.uiFrame  -- Parented to uiFrame so buttons auto-hide with window.
+				-- Parent to ui.frames.main (not uiFrame) so that item buttons inherit
+				-- the same scale context as the group frames they are anchored to.
+				-- This is critical for docked frames (Keyring) where ui.frames.main is
+				-- scaled to 0.8x -- if buttons are parented to uiFrame (unscaled) their
+				-- SetPoint anchors resolve in a different scale space, causing visual offset.
+				-- Auto-hide still works because main is a child of uiFrame.
+				inventory.ui.frames.main
 			)
 			ui.buttons.itemSlots[elementNum] = slotButton
 
@@ -224,6 +232,9 @@ end
 ---@param itemButton table? Item slot button widget.
 function Inventory:ItemButton_OnEnter(itemButton)
 	itemButton = itemButton or _G.this
+	-- Track which button the mouse is currently over so the overlay's OnDragStart
+	-- can identify the correct source item.
+	self._lastHoveredItemButton = itemButton
 
 	-- Cases when nothing should happen.
 	if
@@ -244,13 +255,16 @@ function Inventory:ItemButton_OnEnter(itemButton)
 	-- when the frame is behind other frames.
 	buttonInfo.mouseIsOver = true
 
-	-- Position the secure right-click overlay over this button.
+	-- Position the secure overlay over this button.
 	-- The overlay is a ContainerFrameItemButtonTemplate whose built-in secure
 	-- OnClick calls UseContainerItem without taint.
+	-- Position the secure right-click overlay on the hovered item button.
 	-- Hide when modifier keys are held or in edit mode (those combos have
 	-- special Bagshui behavior on right-click).
+	-- Skip during combat lockdown to avoid tainting the frame hierarchy.
 	if
 		self.secureRightClickOverlay
+		and not (_G.InCombatLockdown and _G.InCombatLockdown())
 		and item and item.bagNum and item.slotNum and item.id and item.id > 0
 		and not self.editMode
 		and not _G.IsAltKeyDown()
@@ -262,13 +276,22 @@ function Inventory:ItemButton_OnEnter(itemButton)
 		bagFrame:SetID(item.bagNum)
 		overlay:SetID(item.slotNum)
 		overlay.bagshuiItemButton = itemButton
+		-- When a spell is targeting (e.g. Disenchant waiting for an item),
+		-- also capture left-clicks so the secure template can call
+		-- UseContainerItem to complete the cast without taint.
+		local spellTargeting = _G.SpellIsTargeting and _G.SpellIsTargeting()
+		-- Always register LeftButtonUp so drop-onto-slot (item swap) works.
+		-- When spell targeting, the template's secure handler also needs LeftButtonUp
+		-- to call UseContainerItem; either way we need it for our OnClick drop forward.
+		overlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		overlay.bagshuiSpellTargeting = spellTargeting or false
 		-- Anchor directly to the item button — WoW handles cross-parent
 		-- scale conversion automatically with SetPoint.
 		overlay:ClearAllPoints()
 		overlay:SetAllPoints(itemButton)
 		overlay:SetFrameStrata("DIALOG")
 		overlay:Show()
-	elseif self.secureRightClickOverlay then
+	elseif self.secureRightClickOverlay and not (_G.InCombatLockdown and _G.InCombatLockdown()) then
 		self.secureRightClickOverlay:Hide()
 	end
 
@@ -809,38 +832,40 @@ local itemButton_OnUpdate_RefreshTooltip
 --   - The `bagshuiData.tooltipCooldownUpdate` property exists and it's been more than 1 second since it was set.
 --   - The `bagshuiData.<modifier>KeyDown` property doesn't match `Is<Modifier>KeyDown()`.
 ---@param elapsed number? Time since the last OnUpdate call.
-function Inventory:ItemButton_OnUpdate(elapsed)
+---@param itemButton table? The item button frame (WotLK explicit self; falls back to _G.this).
+function Inventory:ItemButton_OnUpdate(elapsed, itemButton)
+	local btn = itemButton or _G.this
 
 	-- Refresh stock state every 60 seconds so badges fade in almost real-time.
 	if
-		_G.this.bagshuiData
-		and _G.this.bagshuiData.item
-		and _G.this.bagshuiData.item.bagshuiStockState ~= BS_ITEM_STOCK_STATE.NO_CHANGE
-		and _G.GetTime() - _G.this.bagshuiData.lastStockStateRefresh > 60
-		and _G.this.bagshuiData.type == BS_UI_ITEM_BUTTON_TYPE.ITEM
+		btn.bagshuiData
+		and btn.bagshuiData.item
+		and btn.bagshuiData.item.bagshuiStockState ~= BS_ITEM_STOCK_STATE.NO_CHANGE
+		and _G.GetTime() - btn.bagshuiData.lastStockStateRefresh > 60
+		and btn.bagshuiData.type == BS_UI_ITEM_BUTTON_TYPE.ITEM
 	then
-		self.ui:UpdateItemButtonStockState(_G.this)
-		self.ui:UpdateItemButtonColorsAndBadges(_G.this)
-		_G.this.bagshuiData.lastStockStateRefresh = _G.GetTime()
+		self.ui:UpdateItemButtonStockState(btn)
+		self.ui:UpdateItemButtonColorsAndBadges(btn)
+		btn.bagshuiData.lastStockStateRefresh = _G.GetTime()
 	end
 
 	-- Edit Mode help - make tooltips disappear as soon as the cursor holds an item.
 	if
 		self.editMode
-		and _G.this.bagshuiData.mouseIsOver
+		and btn.bagshuiData.mouseIsOver
 		and self:EditModeCursorHasItem()
-		and _G.GameTooltip:IsOwned(_G.this)
+		and _G.GameTooltip:IsOwned(btn)
 	then
 		self:ItemButton_OnLeave()
 		return
 	end
 
 	-- Clear state tracking variables when the mouse isn't present.
-	if not _G.this.bagshuiData.mouseIsOver then
-		_G.this.bagshuiData.tooltipCooldownUpdate = nil
-		_G.this.bagshuiData.altKeyDown = nil
-		_G.this.bagshuiData.controlKeyDown = nil
-		_G.this.bagshuiData.shiftKeyDown = nil
+	if not btn.bagshuiData.mouseIsOver then
+		btn.bagshuiData.tooltipCooldownUpdate = nil
+		btn.bagshuiData.altKeyDown = nil
+		btn.bagshuiData.controlKeyDown = nil
+		btn.bagshuiData.shiftKeyDown = nil
 		return
 	end
 
@@ -848,48 +873,59 @@ function Inventory:ItemButton_OnUpdate(elapsed)
 	itemButton_OnUpdate_RefreshTooltip = false
 
 	-- More Edit Mode help - display tooltips as soon as the cursor no longer holds an item.
-	if self.editMode and _G.this.bagshuiData.mouseIsOver and not _G.GameTooltip:IsOwned(_G.this) then
+	if self.editMode and btn.bagshuiData.mouseIsOver and not _G.GameTooltip:IsOwned(btn) then
 		itemButton_OnUpdate_RefreshTooltip = true
 	end
 
 	-- Update cooldown info in tooltip.
-	if _G.this.bagshuiData.tooltipCooldownUpdate ~= nil then
-		-- tooltipCooldownUpdate is initially set to 1 by OnEnter when there's a cooldown.
-		-- Here we subtract the elapsed time in seconds, which will eventually go below 0
-		-- so long as the property isn't wiped by moving the mouse off this item.
-		_G.this.bagshuiData.tooltipCooldownUpdate = _G.this.bagshuiData.tooltipCooldownUpdate - elapsed
+	if btn.bagshuiData.tooltipCooldownUpdate ~= nil then
+		btn.bagshuiData.tooltipCooldownUpdate = btn.bagshuiData.tooltipCooldownUpdate - elapsed
 
-		-- Don't proceed until it's been more than 1 second.
-		if _G.this.bagshuiData.tooltipCooldownUpdate < 0 then
+		if btn.bagshuiData.tooltipCooldownUpdate < 0 then
 			itemButton_OnUpdate_RefreshTooltip = true
 		end
 	end
 
 	-- Show/hide tooltip when modifier key state changes.
-	-- The 1/nil to true/false translation was done in our ItemButton_OnEnter
-	-- for reasons explained there, so we need to mirror it here.
 	if
 		(
-			_G.this.bagshuiData.altKeyDown ~= nil
-			and _G.this.bagshuiData.altKeyDown ~= (_G.IsAltKeyDown() == 1)
+			btn.bagshuiData.altKeyDown ~= nil
+			and btn.bagshuiData.altKeyDown ~= (_G.IsAltKeyDown() == 1)
 		)
 		or
 		(
-			_G.this.bagshuiData.controlKeyDown ~= nil
-			and _G.this.bagshuiData.controlKeyDown ~= (_G.IsControlKeyDown() == 1)
+			btn.bagshuiData.controlKeyDown ~= nil
+			and btn.bagshuiData.controlKeyDown ~= (_G.IsControlKeyDown() == 1)
 		)
 		or
 		(
-			_G.this.bagshuiData.shiftKeyDown ~= nil
-			and _G.this.bagshuiData.shiftKeyDown ~= (_G.IsShiftKeyDown() == 1)
+			btn.bagshuiData.shiftKeyDown ~= nil
+			and btn.bagshuiData.shiftKeyDown ~= (_G.IsShiftKeyDown() == 1)
 		)
 	then
 		itemButton_OnUpdate_RefreshTooltip = true
 	end
 
+	-- When a spell starts targeting (e.g. Disenchant) while the mouse is
+	-- already over an item, the overlay needs to capture left-clicks too.
+	if
+		self.secureRightClickOverlay
+		and self.secureRightClickOverlay:IsShown()
+		and not (_G.InCombatLockdown and _G.InCombatLockdown())
+	then
+		local spellTargeting = _G.SpellIsTargeting and _G.SpellIsTargeting()
+		if spellTargeting and not self.secureRightClickOverlay.bagshuiSpellTargeting then
+			self.secureRightClickOverlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+			self.secureRightClickOverlay.bagshuiSpellTargeting = true
+		elseif not spellTargeting and self.secureRightClickOverlay.bagshuiSpellTargeting then
+			self.secureRightClickOverlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+			self.secureRightClickOverlay.bagshuiSpellTargeting = false
+		end
+	end
+
 	-- Time to update the tooltip.
 	if itemButton_OnUpdate_RefreshTooltip then
-		self:ItemButton_OnEnter(_G.this)
+		self:ItemButton_OnEnter(btn)
 	end
 end
 
@@ -1217,6 +1253,35 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 					-- called UseContainerItem to complete the cast. Don't also pick up the item.
 					if _G.SpellIsTargeting and _G.SpellIsTargeting() then
 						-- Nothing to do; template handled it.
+
+					elseif _G.CursorHasItem() then
+						-- Cursor already holding an item — drop/swap it into this slot.
+						-- This handles the case where OnClick fires on mouse-up after
+						-- dragging an item over a different slot (WotLK LeftButtonUp).
+						Bagshui:PickupItem(item, self, itemButton, true)
+
+					elseif not isDrag and item.itemLink and (_G.IsControlKeyDown() or _G.IsShiftKeyDown()) then
+						-- Handle modified clicks (dress-up, chat links) directly using
+						-- the WotLK HandleModifiedItemClick API when available, since
+						-- ContainerFrameItemButton_OnClick may not reach these code
+						-- paths with Bagshui's proxy frames on some private servers.
+						if _G.HandleModifiedItemClick and _G.HandleModifiedItemClick(item.itemLink) then
+							-- HandleModifiedItemClick returned true, meaning it handled
+							-- Ctrl+click (dress-up) or Shift+click (chat link insert).
+							-- Nothing else to do.
+						elseif _G.IsControlKeyDown() and _G.DressUpItemLink then
+							-- Fallback for servers without HandleModifiedItemClick.
+							_G.DressUpItemLink(item.itemLink)
+						elseif _G.IsShiftKeyDown() then
+							-- Shift+click: insert link into chat or split stack.
+							local chatBox = _G.ChatFrameEditBox or (_G.ChatFrame1EditBox)
+							if chatBox and chatBox:IsShown() then
+								chatBox:Insert(item.itemLink)
+							else
+								-- Fall through to PickupItem for stack splitting.
+								Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
+							end
+						end
 					else
 					-- Normal left-click.
 					-- This will eventually become a call to ContainerFrameItemButton_OnClick(), which can handle:

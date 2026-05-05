@@ -398,6 +398,16 @@ function ItemInfo:GetTooltip(item, inventory, forceItemString)
 					if ttText == L.TooltipIdentifier_Openable then
 						item.openable = 1
 					end
+					-- WotLK/Ascension may use different tooltip text for openable items.
+					-- Match "<Right Click to Open>", "<Use: Open ...>", or any line
+					-- containing "open" as a Use: action.
+					if item.openable ~= 1 and (
+						string.find(ttText, "Right Click to Open")
+						or string.find(ttText, "^<Use: Open")
+						or string.find(ttText, "^Use: Open")
+					) then
+						item.openable = 1
+					end
 					if ttText == L.TooltipIdentifier_Locked then
 						item.lockPickable = 1
 					end

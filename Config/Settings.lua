@@ -583,7 +583,7 @@ Bagshui.config.Settings = {
 					name = "windowStrata",
 					scope = BS_SETTING_SCOPE.CHARACTER,
 					type = BS_SETTING_TYPE.CHOICES,
-					defaultValue = "MEDIUM",
+					defaultValue = "HIGH",
 					choices = {
 						{
 							value = "DIALOG",

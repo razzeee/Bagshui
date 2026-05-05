@@ -117,6 +117,53 @@ function Hooks:SetHook(wowApiFunctionName, newFunction, registrationAction, clas
 		end
 
 
+	elseif registrationAction == BS_HOOK_ACTION.SECURE_POST then
+
+		-- WotLK: use hooksecurefunc so our handler runs as a post-hook in a secure
+		-- execution context. This allows Show()/Hide() to work during combat lockdown.
+		-- hooksecurefunc cannot be undone, so we only install once.
+		-- OriginalHook() is a no-op for these since the original already ran before us.
+		if not self.originalHookFunctions[wowApiFunctionName] then
+
+			-- Resolve the handler function the same way as REGISTER.
+			classSelf = nil
+			hookFunction = nil
+			if type(newFunction) == "function" then
+				hookFunction = newFunction
+			end
+			if classObject then
+				classSelf = classObject
+				if type(newFunction) == "string" and classObject[newFunction] then
+					hookFunction = classObject[newFunction]
+				end
+			end
+
+			if type(hookFunction) ~= "function" then
+				Bagshui:PrintWarning("Could not install secure post-hook for '" .. wowApiFunctionName .. "' -- newFunction is not a valid function.")
+				return
+			end
+
+			-- Mark as installed with a sentinel (no original to restore).
+			self.originalHookFunctions[wowApiFunctionName] = true
+
+			-- Install as a secure post-hook. The handler signature matches the
+			-- original function's parameters; wowApiFunctionName is prepended.
+			local capturedClassSelf = classSelf
+			local capturedHookFunction = hookFunction
+			local capturedName = wowApiFunctionName
+			_G.hooksecurefunc(wowApiFunctionName, function(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+				if capturedClassSelf then
+					capturedHookFunction(capturedClassSelf, capturedName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+				else
+					capturedHookFunction(capturedName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+				end
+			end)
+
+		else
+			Bagshui:PrintDebug("Secure post-hook for '" .. wowApiFunctionName .. "' is already installed")
+		end
+
+
 	elseif registrationAction == BS_HOOK_ACTION.UNREGISTER then
 
 		originalFunction = self.originalHookFunctions[wowApiFunctionName]
@@ -161,8 +208,10 @@ function Hooks:OriginalHook(wowApiFunctionName, arg1, arg2, arg3, arg4, arg5, ar
 	if wowApiFunctionName == nil then
 		return
 	end
-	if self.originalHookFunctions[wowApiFunctionName] then
-		return self.originalHookFunctions[wowApiFunctionName](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+	local orig = self.originalHookFunctions[wowApiFunctionName]
+	-- SECURE_POST hooks store `true` as sentinel; the original already ran before our post-hook.
+	if orig and orig ~= true then
+		return orig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
 	end
 end
 
