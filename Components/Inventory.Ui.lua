@@ -43,89 +43,6 @@ function Inventory:InitUi()
 	self:FixWindowPosition()
 	uiFrame:Hide()
 
-	-- Secure right-click overlay for UseContainerItem.
-	-- UseContainerItem is protected on WotLK; the only way to call it without
-	-- taint is through a real hardware click on a ContainerFrameItemButtonTemplate
-	-- button whose GetID() and GetParent():GetID() return the correct slot and bag.
-	-- We create ONE such overlay button, reposition it on top of whichever item
-	-- slot the mouse enters, and let the template's built-in secure OnClick handle
-	-- the right-click → UseContainerItem call.
-	do
-		-- Intermediate parent frame whose SetID(bagNum) satisfies
-		-- GetParent():GetID() in the template's secure OnClick.
-		local overlayBagFrame = _G.CreateFrame(
-			"Frame",
-			ui:CreateElementName("SecureOverlayBag"),
-			_G.UIParent
-		)
-		overlayBagFrame:SetID(0)
-
-		-- The overlay button uses ContainerFrameItemButtonTemplate which has
-		-- a built-in secure OnClick calling ContainerFrameItemButton_OnClick.
-		local overlayButton = _G.CreateFrame(
-			"Button",
-			ui:CreateElementName("SecureOverlay"),
-			overlayBagFrame,
-			"ContainerFrameItemButtonTemplate"
-		)
-		overlayButton:SetID(0)
-		-- DEBUG: Make overlay visible so we can confirm positioning.
-		overlayButton:SetAlpha(0.01)
-		overlayButton:Hide()
-
-		local inv = self
-		overlayButton:SetScript("OnEnter", function()
-			if overlayButton.bagshuiItemButton then
-				inv:ItemButton_OnEnter(overlayButton.bagshuiItemButton)
-			end
-		end)
-		overlayButton:SetScript("OnLeave", function()
-			if overlayButton.bagshuiItemButton then
-				inv:ItemButton_OnLeave(overlayButton.bagshuiItemButton)
-			end
-			overlayButton:Hide()
-		end)
-		-- The overlay sits on top of item buttons and intercepts all mouse events
-		-- including drags. Handle OnDragStart here using the last hovered button
-		-- as the drag source (set in ItemButton_OnEnter).
-		overlayButton:RegisterForDrag("LeftButton")
-		overlayButton:RegisterForClicks("RightButtonUp", "LeftButtonUp")
-		overlayButton:SetScript("OnMouseDown", function(_, btn)
-			-- Snapshot the hovered button at mouse-down so OnDragStart uses the
-			-- correct source even after the mouse drifts to an adjacent slot.
-			if btn == "LeftButton" then
-				inv._dragSourceButton = inv._lastHoveredItemButton
-			end
-		end)
-		overlayButton:SetScript("OnDragStart", function()
-			local srcButton = inv._dragSourceButton or inv._lastHoveredItemButton
-			if srcButton then
-				local savedThis = _G.this
-				_G.this = srcButton
-				inv:ItemButton_OnClick("LeftButton", true)
-				_G.this = savedThis
-			end
-			inv._dragSourceButton = nil
-		end)
-		-- When the cursor is carrying an item and the player releases it over a
-		-- slot, forward the drop to the underlying Bagshui item button so items
-		-- can swap/stack correctly. OnReceiveDrag fires when a carried item is
-		-- dropped; we do NOT set OnClick so the template's built-in secure
-		-- right-click handler (UseContainerItem) remains intact.
-		overlayButton:SetScript("OnReceiveDrag", function()
-			local destButton = inv._lastHoveredItemButton
-			if destButton and _G.CursorHasItem() then
-				local savedThis = _G.this
-				_G.this = destButton
-				inv:ItemButton_OnClick("LeftButton", true)
-				_G.this = savedThis
-			end
-		end)
-
-		self.secureRightClickOverlay = overlayButton
-		self.secureRightClickBagFrame = overlayBagFrame
-	end
-
 	-- All uiFrame scripts are registered without the WotLK shim wrapper using
 	-- BagshuiSetScriptRaw. The shim writes to _G.this/_G.arg* globals which
 	-- permanently taints the frame, preventing Show()/Hide() during combat.
@@ -979,13 +896,10 @@ function Inventory:InitUi()
 	end
 
 
-	-- Clam, Disenchant, and PickLock buttons are skipped on WotLK 3.3.5.
-	-- Creating SecureActionButtonTemplate buttons (even parented to UIParent)
-	-- taints the execution context via SetScript calls, which blocks
-	-- uiFrame:Show() in combat. These buttons are not available on WotLK.
-	if false then
-
 	-- Clam (open container) button.
+	-- On WotLK we can't use SecureActionButtonTemplate (it taints uiFrame:Show()),
+	-- so we use a plain button and call UseContainerItem directly on click.
+	-- This won't work in combat, but opening clams in combat is not meaningful anyway.
 	buttons.toolbar.clam = ui:CreateIconButton({
 		name = "Clam",
 		parentFrame = footer,
@@ -995,7 +909,12 @@ function Inventory:InitUi()
 		disable = false,
 		texture = "Clam",
 		tooltipTitle = L.OpenContainer,
-		template = "SecureActionButtonTemplate",
+		onClick = function()
+			if _G.InCombatLockdown and _G.InCombatLockdown() then return end
+			if self.nextOpenableItemBagNum and self.nextOpenableItemSlotNum then
+				_G.UseContainerItem(self.nextOpenableItemBagNum, self.nextOpenableItemSlotNum)
+			end
+		end,
 		onEnter = function()
 			_G.this.bagshuiData.mouseIsOver = true
 		end,
@@ -1023,10 +942,19 @@ function Inventory:InitUi()
 		end,
 	})
 
+	-- Disenchant and PickLock buttons are disabled on this WotLK 3.3.5 build.
+	-- SecureActionButtonTemplate buttons taint uiFrame:Show() if they have any
+	-- SetPoint anchor to a frame in uiFrame's hierarchy (even across different
+	-- parent chains). Positioning them without any such anchor via a tracker
+	-- frame's OnUpdate works around the taint, but ClearAllPoints/SetPoint on
+	-- secure frames is also blocked in combat lockdown, causing a second error.
+	-- There is no clean runtime solution without XML-defined secure templates.
+	if false then  -- disabled on WotLK 3.3.5
+
 	if self.disenchantButton then
 		buttons.toolbar.disenchant = ui:CreateIconButton({
 			name = "Disenchant",
-			parentFrame = footer,
+			parentFrame = _G.UIParent,
 			anchorPoint = "RIGHT",
 			anchorToFrame = buttons.toolbar.clam,
 			anchorToPoint = "LEFT",
@@ -1038,6 +966,7 @@ function Inventory:InitUi()
 			onUpdate = inventory_SpellButton_OnUpdate,
 		})
 		buttons.toolbar.disenchant.bagshuiData.spellName = L.Spell_Disenchant
+		buttons.toolbar.disenchant:SetFrameStrata(self.settings.windowStrata or "HIGH")
 		buttons.toolbar.disenchant:SetAttribute("type", "spell")
 		buttons.toolbar.disenchant:SetAttribute("spell", L.Spell_Disenchant)
 		buttons.toolbar.disenchant:HookScript("OnClick", function(self)
@@ -1050,7 +979,7 @@ function Inventory:InitUi()
 		local pickLockAnchorFrame = buttons.toolbar.disenchant or buttons.toolbar.clam
 		buttons.toolbar.pickLock = ui:CreateIconButton({
 			name = "PickLock",
-			parentFrame = footer,
+			parentFrame = _G.UIParent,
 			anchorPoint = "RIGHT",
 			anchorToFrame = pickLockAnchorFrame,
 			anchorToPoint = "LEFT",
@@ -1062,6 +991,7 @@ function Inventory:InitUi()
 			onUpdate = inventory_SpellButton_OnUpdate,
 		})
 		buttons.toolbar.pickLock.bagshuiData.spellName = L.Spell_PickLock
+		buttons.toolbar.pickLock:SetFrameStrata(self.settings.windowStrata or "HIGH")
 		buttons.toolbar.pickLock:SetAttribute("type", "spell")
 		buttons.toolbar.pickLock:SetAttribute("spell", L.Spell_PickLock)
 		buttons.toolbar.pickLock:HookScript("OnClick", function(self)
@@ -1070,20 +1000,45 @@ function Inventory:InitUi()
 		buttons.toolbar.pickLock:Hide()
 	end
 
-	end -- not Bagshui.isWotLK
+	do  -- Spell button position tracker
+		local spellButtonSize = 14
+		local spellButtonXOffset = -6
+		local clamButton = buttons.toolbar.clam
+		local disenchantButton = buttons.toolbar.disenchant
+		local pickLockButton = buttons.toolbar.pickLock
+		local trackerFrame = _G.CreateFrame("Frame")
+		trackerFrame:SetScript("OnUpdate", function()
+			if not clamButton or not clamButton:IsVisible() then return end
+			if _G.InCombatLockdown and _G.InCombatLockdown() then return end
+			local nextRight = (clamButton:GetLeft() or 0)
+			local bottom = (clamButton:GetBottom() or 0)
+			if nextRight == 0 then return end
+			if disenchantButton and disenchantButton:IsShown() then
+				local x = nextRight + spellButtonXOffset - spellButtonSize
+				disenchantButton:ClearAllPoints()
+				disenchantButton:SetPoint("BOTTOMLEFT", _G.UIParent, "BOTTOMLEFT", x, bottom)
+				nextRight = x
+			end
+			if pickLockButton and pickLockButton:IsShown() then
+				local x = nextRight + spellButtonXOffset - spellButtonSize
+				pickLockButton:ClearAllPoints()
+				pickLockButton:SetPoint("BOTTOMLEFT", _G.UIParent, "BOTTOMLEFT", x, bottom)
+			end
+		end)
+	end
+
+	end  -- if false: disenchant/picklock disabled on WotLK 3.3.5
 
 
 
 	-- Bottom right toolbar order, consumed by `Inventory:UpdateToolbarAnchoring()`
 	-- to manage anchoring based on what is visible.
+	-- NOTE: disenchant and pickLock are disabled (see comment above) and excluded.
 	self.ui.ordering.bottomRightToolbar = {
 		frames.bottomRightToolbarAnchor,
 		frames.money,
 		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.clam,
-		buttons.toolbar.pickLock,
-		-BsSkin.toolbarGroupSpacing,
-		buttons.toolbar.disenchant,
 		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.hearthstone,
 	}
@@ -1361,11 +1316,6 @@ function Inventory:UiFrame_OnHide()
 	self:CloseMenusAndClearFocuses()
 	self:ClearEditModeCursor()
 	self:SetCharacter(Bagshui.currentCharacterId)
-	-- Hide the secure right-click overlay (skip during combat to avoid taint).
-	if self.secureRightClickOverlay and not (_G.InCombatLockdown and _G.InCombatLockdown()) then
-		self.secureRightClickOverlay:Hide()
-	end
-
 	_G.PlaySound(self.closeSound)
 
 	-- If there's a frame docked to this frame, close it too.

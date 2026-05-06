@@ -1323,13 +1323,41 @@ function Inventory:AssignItemsToSlots(
 				button.bagshuiData.slotNum = self.groupItems[groupId][position].slotNum
 				button.bagshuiData.isEmptySlotStack = isEmptySlotStack
 
+				-- Update IDs for the shared secure use button.
+				-- SetID is safe outside combat; layout only runs outside combat.
+				button:SetID(button.bagshuiData.slotNum)
+				if button.bagshuiData.dummyBagFrame then
+					button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
+					-- SetParent to dummyBagFrame at layout time (Bagnon pattern).
+					-- Layout runs outside combat so SetParent is safe.
+					button:SetParent(button.bagshuiData.dummyBagFrame)
+				end
+
 				-- Display the item slot button.
-				self:ShowFrameInNextPosition(
-					"AssignItemsToSlots",
-					rowNum,
-					button,
-					itemSlotSize
-				)
+				-- Position dummyBagFrame (the layout container) rather than the button
+				-- directly, so button:SetPoint stays within its own parent hierarchy
+				-- and WotLK doesn't implicitly reparent the button away from dummyBagFrame.
+				if button.bagshuiData.dummyBagFrame then
+					self:ShowFrameInNextPosition(
+						"AssignItemsToSlots",
+						rowNum,
+						button.bagshuiData.dummyBagFrame,
+						itemSlotSize
+					)
+					-- Pin the button to fill dummyBagFrame exactly.
+					-- SetItemButtonSize handles the button's internal scale.
+					self.ui:SetItemButtonSize(button, itemSlotSize)
+					button:ClearAllPoints()
+					button:SetPoint("CENTER", button.bagshuiData.dummyBagFrame, "CENTER", 0, 0)
+					button:Show()
+				else
+					self:ShowFrameInNextPosition(
+						"AssignItemsToSlots",
+						rowNum,
+						button,
+						itemSlotSize
+					)
+				end
 
 				-- Add the item to the button (texture, tooltip, etc.).
 				self.ui:AssignItemToItemButton(button, item, groupId)
@@ -2158,19 +2186,8 @@ function Inventory:UpdateToolbar()
 	end
 
 	-- Clam (open container) button.
-	-- Update the secure "item" attribute so the hardware click uses UseContainerItem
-	-- on the correct slot. SetAttribute is blocked during combat, but the clam
-	-- button is also disabled then, so this is fine.
-	if
-		toolbarButtons.clam
-		and self.nextOpenableItemBagNum
-		and self.nextOpenableItemSlotNum
-		and not (_G.InCombatLockdown and _G.InCombatLockdown())
-	then
-		toolbarButtons.clam:SetAttribute("type", "item")
-		toolbarButtons.clam:SetAttribute("bag", self.nextOpenableItemBagNum)
-		toolbarButtons.clam:SetAttribute("slot", self.nextOpenableItemSlotNum)
-	end
+	-- Plain button on WotLK: onClick calls UseContainerItem directly (see Inventory.Ui.lua).
+	-- nextOpenableItemBagNum/SlotNum are read at click time, no attributes needed.
 	self:SetToolbarButtonState(
 		toolbarButtons.clam,
 		(
@@ -2190,6 +2207,7 @@ function Inventory:UpdateToolbar()
 	)
 
 	-- Disenchant button.
+	-- Disabled on WotLK 3.3.5: see comment in Inventory.Ui.lua near InitUi spell buttons.
 	self:SetToolbarButtonState(
 		toolbarButtons.disenchant,
 		(

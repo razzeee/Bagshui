@@ -202,9 +202,6 @@ function Ui:CreateDropDownMenuButton(name, parent, width, menusInstance, menuTyp
 
 	dropDown:SetScript("OnShow", dropDownMenuPrep)
 
-	-- Call prep once to make sure everything is in order.
-	dropDownMenuPrep(dropDown)
-
 	return dropDown
 end
 

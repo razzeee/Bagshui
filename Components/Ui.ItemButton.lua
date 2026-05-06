@@ -180,8 +180,14 @@ function Ui:CreateItemSlotButton(name, parent, template)
 	}
 
 	-- Default script handlers.
+	-- OnEnter MUST be set to override ContainerFrameItemButtonTemplate's intrinsic
+	-- OnEnter which calls UIDropDownMenu_Initialize and crashes other addons' dropdowns.
 	button:SetScript("OnEnter", ItemButton_OnEnter)
-	button:SetScript("OnClick", ItemButton_OnClick)
+	-- Don't override OnClick for ContainerFrameItemButtonTemplate -- its secure handler
+	-- (UseContainerItem) cannot be restored once overwritten with SetScript.
+	if template ~= "ContainerFrameItemButtonTemplate" then
+		button:SetScript("OnClick", ItemButton_OnClick)
+	end
 	button:SetScript("OnLeave", ItemButton_OnLeave)
 	button:SetScript("OnUpdate", ItemButton_OnUpdate)
 	button:SetScript("OnHide", ItemButton_OnHide)

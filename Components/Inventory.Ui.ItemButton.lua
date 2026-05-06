@@ -36,7 +36,8 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 	-- Wrapper functions so we can reference self.
 	if not inventory._itemSlotButton_ScriptWrapper_OnClick then
 		function inventory._itemSlotButton_ScriptWrapper_OnClick(btn, mouseButton)
-			inventory:ItemButton_OnClick(mouseButton or _G.arg1)
+			mouseButton = mouseButton or _G.arg1
+			inventory:ItemButton_OnClick(mouseButton)
 		end
 		function inventory._itemSlotButton_ScriptWrapper_OnDragStart()
 			inventory:ItemButton_OnClick("LeftButton", true)
@@ -65,20 +66,22 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 		buttonNum,
 		ui.buttons.itemSlots,
 		function(elementNum)
-			-- Use the default ItemButtonTemplate (no secure template) so that
-			-- uiFrame:Show() is not blocked by secure-frame taint propagation on WotLK.
-			-- Right-click UseContainerItem is handled via Bagshui's own OnClick logic.
+			-- Use ContainerFrameItemButtonTemplate like Bagnon: create with nil parent,
+			-- SetParent to dummyBagFrame at layout time (AssignItemsToSlots).
+			-- SetScript('OnEnter', ...) replaces the template's broken intrinsic OnEnter
+			-- (which calls UIDropDownMenu_Initialize and crashes other addons' dropdowns).
+			-- Right-click UseContainerItem is handled by the template's secure OnClick.
+
+			local dummyBagFrame = _G.CreateFrame("Frame", nil, inventory.ui.frames.main)
+			dummyBagFrame:SetID(0)
+
 			local slotButton = ui:CreateItemSlotButton(
 				"Item"..elementNum,
-				-- Parent to ui.frames.main (not uiFrame) so that item buttons inherit
-				-- the same scale context as the group frames they are anchored to.
-				-- This is critical for docked frames (Keyring) where ui.frames.main is
-				-- scaled to 0.8x -- if buttons are parented to uiFrame (unscaled) their
-				-- SetPoint anchors resolve in a different scale space, causing visual offset.
-				-- Auto-hide still works because main is a child of uiFrame.
-				inventory.ui.frames.main
+				nil,
+				"ContainerFrameItemButtonTemplate"
 			)
 			ui.buttons.itemSlots[elementNum] = slotButton
+			slotButton.bagshuiData.dummyBagFrame = dummyBagFrame
 
 			-- Used by OnUpdate to manage real-time stock badge fading.
 			slotButton.bagshuiData.lastStockStateRefresh = _G.GetTime()
@@ -91,13 +94,19 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 			slotButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 			slotButton:RegisterForDrag("LeftButton")
 
-			slotButton:SetScript("OnClick", inventory._itemSlotButton_ScriptWrapper_OnClick)
+			-- Use PostClick so template's secure OnClick (UseContainerItem) fires first.
+			slotButton:SetScript("PostClick", inventory._itemSlotButton_ScriptWrapper_OnClick)
 			slotButton:SetScript("OnDragStart", inventory._itemSlotButton_ScriptWrapper_OnDragStart)
 			slotButton:SetScript("OnReceiveDrag", inventory._itemSlotButton_ScriptWrapper_OnReceiveDrag)
 			slotButton:SetScript("OnUpdate", inventory._itemSlotButton_ScriptWrapper_OnUpdate)
 			slotButton:SetScript("OnEnter", inventory._itemSlotButton_ScriptWrapper_OnEnter)
 			slotButton:SetScript("OnLeave", inventory._itemSlotButton_ScriptWrapper_OnLeave)
 			slotButton:SetScript("OnHide", InventoryItemButton_OnHide)
+
+			-- Parent to dummyBagFrame so GetParent():GetID() returns the correct bagNum
+			-- for ContainerFrameItemButtonTemplate's secure OnClick (UseContainerItem).
+			-- Re-set each layout pass in AssignItemsToSlots with the correct bag number.
+			slotButton:SetParent(dummyBagFrame)
 
 			self:AddItemSlotButtonGetIdProxy(slotButton)
 		end
@@ -232,9 +241,6 @@ end
 ---@param itemButton table? Item slot button widget.
 function Inventory:ItemButton_OnEnter(itemButton)
 	itemButton = itemButton or _G.this
-	-- Track which button the mouse is currently over so the overlay's OnDragStart
-	-- can identify the correct source item.
-	self._lastHoveredItemButton = itemButton
 
 	-- Cases when nothing should happen.
 	if
@@ -254,46 +260,6 @@ function Inventory:ItemButton_OnEnter(itemButton)
 	-- This is used instead of MouseIsOver() because that function returns true even
 	-- when the frame is behind other frames.
 	buttonInfo.mouseIsOver = true
-
-	-- Position the secure overlay over this button.
-	-- The overlay is a ContainerFrameItemButtonTemplate whose built-in secure
-	-- OnClick calls UseContainerItem without taint.
-	-- Position the secure right-click overlay on the hovered item button.
-	-- Hide when modifier keys are held or in edit mode (those combos have
-	-- special Bagshui behavior on right-click).
-	-- Skip during combat lockdown to avoid tainting the frame hierarchy.
-	if
-		self.secureRightClickOverlay
-		and not (_G.InCombatLockdown and _G.InCombatLockdown())
-		and item and item.bagNum and item.slotNum and item.id and item.id > 0
-		and not self.editMode
-		and not _G.IsAltKeyDown()
-		and not _G.IsControlKeyDown()
-	then
-		local overlay = self.secureRightClickOverlay
-		local bagFrame = self.secureRightClickBagFrame
-		-- Set IDs so the template's secure handler gets the right bag/slot.
-		bagFrame:SetID(item.bagNum)
-		overlay:SetID(item.slotNum)
-		overlay.bagshuiItemButton = itemButton
-		-- When a spell is targeting (e.g. Disenchant waiting for an item),
-		-- also capture left-clicks so the secure template can call
-		-- UseContainerItem to complete the cast without taint.
-		local spellTargeting = _G.SpellIsTargeting and _G.SpellIsTargeting()
-		-- Always register LeftButtonUp so drop-onto-slot (item swap) works.
-		-- When spell targeting, the template's secure handler also needs LeftButtonUp
-		-- to call UseContainerItem; either way we need it for our OnClick drop forward.
-		overlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-		overlay.bagshuiSpellTargeting = spellTargeting or false
-		-- Anchor directly to the item button — WoW handles cross-parent
-		-- scale conversion automatically with SetPoint.
-		overlay:ClearAllPoints()
-		overlay:SetAllPoints(itemButton)
-		overlay:SetFrameStrata("DIALOG")
-		overlay:Show()
-	elseif self.secureRightClickOverlay and not (_G.InCombatLockdown and _G.InCombatLockdown()) then
-		self.secureRightClickOverlay:Hide()
-	end
 
 	-- Highlight all items belonging to a category on mouseover in Edit Mode,
 	-- but only if an object hasn't been picked up.
@@ -587,7 +553,7 @@ function Inventory:ItemButton_OnEnter(itemButton)
 						and self.itemPendingSale == item
 					then
 						self:AddBagshuiInfoTooltipLine(BS_FONT_COLOR.UI_ORANGE .. L.Inventory_Item_SellProtection_ConfirmSale .. FONT_COLOR_CODE_CLOSE)
-						self:AddBagshuiInfoTooltipLine(LIGHTYELLOW_FONT_COLOR_CODE .. string.format(L.Inventory_Item_SellProtection_Reason, self:GetItemSellProtectionReason(item)) .. FONT_COLOR_CODE_CLOSE)
+						self:AddBagshuiInfoTooltipLine(LIGHTYELLOW_FONT_COLOR_CODE .. string.format(L.Inventory_Item_SellProtection_Reason, self:GetItemSellProtectionReason(item) or "") .. FONT_COLOR_CODE_CLOSE)
 						self:AddBagshuiInfoTooltipLine(GRAY_FONT_COLOR_CODE .. L.Inventory_Item_SellProtection_OverrideHint .. FONT_COLOR_CODE_CLOSE)
 					end
 
@@ -904,23 +870,6 @@ function Inventory:ItemButton_OnUpdate(elapsed, itemButton)
 		)
 	then
 		itemButton_OnUpdate_RefreshTooltip = true
-	end
-
-	-- When a spell starts targeting (e.g. Disenchant) while the mouse is
-	-- already over an item, the overlay needs to capture left-clicks too.
-	if
-		self.secureRightClickOverlay
-		and self.secureRightClickOverlay:IsShown()
-		and not (_G.InCombatLockdown and _G.InCombatLockdown())
-	then
-		local spellTargeting = _G.SpellIsTargeting and _G.SpellIsTargeting()
-		if spellTargeting and not self.secureRightClickOverlay.bagshuiSpellTargeting then
-			self.secureRightClickOverlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-			self.secureRightClickOverlay.bagshuiSpellTargeting = true
-		elseif not spellTargeting and self.secureRightClickOverlay.bagshuiSpellTargeting then
-			self.secureRightClickOverlay:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-			self.secureRightClickOverlay.bagshuiSpellTargeting = false
-		end
 	end
 
 	-- Time to update the tooltip.
@@ -1249,57 +1198,42 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 				_G.this = itemButton.bagshuiData.getIdProxy or _G.this
 
 				if mouseButton == "LeftButton" then
-					-- If a spell is targeting (e.g. Disenchant), the template's OnClick already
-					-- called UseContainerItem to complete the cast. Don't also pick up the item.
-					if _G.SpellIsTargeting and _G.SpellIsTargeting() then
-						-- Nothing to do; template handled it.
+					-- Template's OnClick already fired before this PostClick handler,
+					-- handling UseContainerItem (right-click) and PickupContainerItem
+					-- (plain left-click) in a secure context. We only handle cases the
+					-- template doesn't cover.
+					if isDrag then
+						-- Drag-initiated pickup: go directly to PickupContainerItem.
+						Bagshui:PickupItem(item, self, itemButton, true)
+
+					elseif _G.SpellIsTargeting and _G.SpellIsTargeting() then
+						-- Nothing to do; template handled UseContainerItem for the cast.
 
 					elseif _G.CursorHasItem() then
 						-- Cursor already holding an item — drop/swap it into this slot.
-						-- This handles the case where OnClick fires on mouse-up after
-						-- dragging an item over a different slot (WotLK LeftButtonUp).
 						Bagshui:PickupItem(item, self, itemButton, true)
 
 					elseif not isDrag and item.itemLink and (_G.IsControlKeyDown() or _G.IsShiftKeyDown()) then
-						-- Handle modified clicks (dress-up, chat links) directly using
-						-- the WotLK HandleModifiedItemClick API when available, since
-						-- ContainerFrameItemButton_OnClick may not reach these code
-						-- paths with Bagshui's proxy frames on some private servers.
+						-- Handle modified clicks (dress-up, chat links) directly.
+						-- Template already attempted these; this is a fallback.
 						if _G.HandleModifiedItemClick and _G.HandleModifiedItemClick(item.itemLink) then
-							-- HandleModifiedItemClick returned true, meaning it handled
-							-- Ctrl+click (dress-up) or Shift+click (chat link insert).
-							-- Nothing else to do.
+							-- Handled.
 						elseif _G.IsControlKeyDown() and _G.DressUpItemLink then
-							-- Fallback for servers without HandleModifiedItemClick.
 							_G.DressUpItemLink(item.itemLink)
 						elseif _G.IsShiftKeyDown() then
-							-- Shift+click: insert link into chat or split stack.
 							local chatBox = _G.ChatFrameEditBox or (_G.ChatFrame1EditBox)
 							if chatBox and chatBox:IsShown() then
 								chatBox:Insert(item.itemLink)
 							else
-								-- Fall through to PickupItem for stack splitting.
 								Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
 							end
 						end
-					else
-					-- Normal left-click.
-					-- This will eventually become a call to ContainerFrameItemButton_OnClick(), which can handle:
-					-- - Control+click dress-up.
-					-- - Shift+click chat links.
-					-- - Shift+click stack splitting.
-					-- - Calling PickupContainerItem() if none of the above are met.
-					-- It also allows hooks to both ContainerFrameItemButton_OnClick() and PickupContainerItem() to work.
-					-- (See the declaration of Bagshui:PickupItem() for details about why it exists.)
-					Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
+					-- else: plain left-click — template's PickupContainerItem already fired.
 					end
 
 				else
-					-- Normal right-click: UseContainerItem is handled by the secure
-					-- right-click overlay (ContainerFrameItemButtonTemplate button
-					-- positioned on top of each item slot in OnEnter).  The Bagshui
-					-- OnClick should not reach here for plain right-click because the
-					-- overlay captures RightButtonUp.  Nothing to do from addon code.
+					-- Right-click: handled by ContainerFrameItemButtonTemplate's
+					-- secure OnClick (UseContainerItem). Nothing to do here.
 				end
 				-- Restore global this.
 				_G.this = oldGlobalThis

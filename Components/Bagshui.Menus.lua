@@ -80,12 +80,12 @@ local TOGGLE_DROPDOWN_MENU_SECOND_PASS = "BAGSHUI_TOGGLE_DROPDOWN_MENU_THIRD_PAS
 ---@param yOffset number? Parameter for the original `ToggleDropDownMenu()`.
 ---@param bagshuiAdditionalPassReason string? When another pass needs to be made to re-check the menu's position, this extra parameter is added.
 function Bagshui:ToggleDropDownMenu(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset, _, _, _, bagshuiAdditionalPassReason)
-	-- If this is not a Bagshui-initiated call and not one of our additional passes,
-	-- pass straight through to the original function without any Bagshui involvement.
+	-- Now a hooksecurefunc post-hook: the original ToggleDropDownMenu already ran.
+	-- Only perform Bagshui repositioning for Bagshui's own menu.
 	local isBagshuiCall = bagshuiAdditionalPassReason ~= nil
 		or (self.menuFrame and dropDownFrame == self.menuFrame)
 	if not isBagshuiCall then
-		return self.hooks:OriginalHook(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset)
+		return
 	end
 
 	-- Record whether we're in one of the additional passes.
@@ -98,21 +98,9 @@ function Bagshui:ToggleDropDownMenu(wowApiFunctionName, level, value, dropDownFr
 		phase = 2
 	end
 
-	-- Let Blizzard code open the menu on first pass.
-	-- Additional passes must avoid calling this or the menu will be closed.
-	-- Calling on an additional pass can also trigger errors because the meaning of `this` will have
-	-- changed, and ToggleDropDownMenu() won't be able to populate its tempFrame variable.
-	if phase == 0 then
-		self.hooks:OriginalHook(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset)
-		-- At one point there were crashes happening when right-clicking inventory windows to open the menu.
-		-- It SEEMS like they were fixed by avoiding touching cursor-anchored menus during the level 1 checks.
-		-- If there are still crashing issues reported, this may need to be enabled in lieu of the
-		-- immediate call above. (It's not ideal, since there will be a flash of the menu in the wrong position.)
-		-- Bagshui:QueueEvent(function()
-		-- 	self:ToggleDropDownMenu(wowApiFunctionName, level, value, dropDownFrame, anchorName, xOffset, yOffset, nil, nil, nil, TOGGLE_DROPDOWN_MENU_FIRST_PASS)
-		-- end)
-		-- return
-	end
+	-- Original already ran (phase 0 = first call from Bagshui:OpenMenu via ToggleDropDownMenu).
+	-- Additional passes are re-entrant calls we queue ourselves for repositioning.
+	-- (No OriginalHook needed -- the secure post-hook guarantees original already fired.)
 
 	-- Don't mess with anyone else's menus.
 	if not self:IsMenuOpen() then

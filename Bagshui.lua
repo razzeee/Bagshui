@@ -986,7 +986,6 @@ local Bagshui = {
 		OpenStackSplitFrame = "OpenStackSplitFrame",
 		PickupBagFromSlot = "PickupInventoryItem",
 		PickupInventoryItem = "PickupInventoryItem",
-		ToggleDropDownMenu = "ToggleDropDownMenu",
 		UIDropDownMenu_AddButton = "UIDropDownMenu_AddButton",
 	},
 
@@ -1114,23 +1113,6 @@ function Bagshui:Init()
 	self:RegisterEvent("PLAYER_LOGOUT")
 
 
-	-- Shared menu hosting frame.
-	self.menuFrame = _G.CreateFrame(
-		"Frame",
-		"BagshuiMenuHostFrame",
-		nil,
-		"UIDropDownMenuTemplate"
-	)
-	self.menuFrame.bagshuiData = {
-		name = self.menuFrame:GetName(),
-		-- Populated by `Menus:ShowMenu()` and consumed by `Bagshui:IsMenuOpen()`.
-		lastMenuTypeLoaded = nil,
-		-- Can be set to true before calling `Menus:ShowMenu()` to avoid changing
-		-- level 1 anchors unnecessarily in `Bagshui:ToggleDropDownMenu()`.
-		noFirstLevelRepositionNeeded = nil,
-	}
-
-
 	-- Key binding header; doesn't need localization.
 	-- Localized versions of inventory key binding names are populated during Inventory class creation.
 	_G.BINDING_HEADER_Bagshui = "Bagshui"
@@ -1164,6 +1146,32 @@ function Bagshui:AddonLoaded()
 
 	-- Prepare game function hooks.
 	self.hooks = Bagshui.prototypes.Hooks:New(self.apiFunctionsToHook, self)
+
+	-- ToggleDropDownMenu must be hooked as a secure post-hook (hooksecurefunc) rather
+	-- than a direct global replacement. Replacing it taints all callers, which prevents
+	-- UIDropDownMenuDelegate:SetAttribute("createframes") from firing in a secure context,
+	-- so DropDownList1Button<N> frames are never created, breaking all addons' dropdowns.
+	self.hooks:SetHooks({ ToggleDropDownMenu = "ToggleDropDownMenu" }, BS_HOOK_ACTION.SECURE_POST, self)
+
+	-- Shared menu hosting frame. Created here (on ADDON_LOADED) rather than in
+	-- Init() so that FrameXML is fully initialized first. UIDropDownMenuTemplate's
+	-- OnLoad calls UIDropDownMenu_Initialize which creates DropDownList1Button<N>
+	-- frames; if called too early (before FrameXML finishes) those frames are
+	-- created in an incomplete state, breaking other addons' dropdowns.
+	self.menuFrame = _G.CreateFrame(
+		"Frame",
+		"BagshuiMenuHostFrame",
+		nil,
+		"UIDropDownMenuTemplate"
+	)
+	self.menuFrame.bagshuiData = {
+		name = self.menuFrame:GetName(),
+		-- Populated by `Menus:ShowMenu()` and consumed by `Bagshui:IsMenuOpen()`.
+		lastMenuTypeLoaded = nil,
+		-- Can be set to true before calling `Menus:ShowMenu()` to avoid changing
+		-- level 1 anchors unnecessarily in `Bagshui:ToggleDropDownMenu()`.
+		noFirstLevelRepositionNeeded = nil,
+	}
 
 	local dataVersionKey = BS_CONFIG_KEY.DATA_VERSION
 	local charactersKey = BS_CONFIG_KEY.CHARACTERS
