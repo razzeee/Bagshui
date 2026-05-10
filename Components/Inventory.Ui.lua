@@ -105,11 +105,6 @@ function Inventory:InitUi()
 	end
 
 	_setScript(uiFrame, "OnMouseDown", function(_, btn)
-		-- Clear a pending item sale.
-		if self.itemPendingSale then
-			self:ClearItemPendingSale()
-		end
-
 		if btn == "LeftButton" then
 			-- Close non-Settings menus on left mouse down (Settings is closed OnMouseUp).
 			if not self.menus:IsMenuOpen("Settings") then
@@ -842,6 +837,11 @@ function Inventory:InitUi()
 
 
 	-- Hearthstone button.
+	--
+	-- Display: a standard CreateIconButton (yellow hearthstone icon, cooldown, tooltip).
+	-- Click: a ContainerFrameItemButtonTemplate button layered on top, all textures
+	-- cleared so it's invisible. Its intrinsic XML OnClick fires UseContainerItem
+	-- taint-free. It delegates OnEnter/OnLeave/OnDragStart to the display button.
 
 	buttons.toolbar.hearthstone = ui:CreateIconButton({
 		name = "Hearthstone",
@@ -850,17 +850,6 @@ function Inventory:InitUi()
 		anchorToFrame = frames.money,
 		anchorToPoint = "LEFT",
 		disable = false,
-		onClick = function()
-			if Bagshui:GetCursorItem() == self.hearthstoneItemRef then
-				_G.ClearCursor()
-				return
-			end
-			if self.hearthstoneItemRef then
-				_G.UseContainerItem(self.hearthstoneItemRef.bagNum, self.hearthstoneItemRef.slotNum, true)
-			else
-				Bagshui:ShowAndLogErrorMessage(L.Error_HearthstoneNotFound)
-			end
-		end,
 		texture = "Hearthstone",
 		onEnter = function()
 			if self.hearthstoneItemRef then
@@ -889,10 +878,75 @@ function Inventory:InitUi()
 		self.pickedUpHearthstoneFromButton = true
 	end)
 
+	do
+		-- Invisible ContainerFrameItemButtonTemplate button layered on top of the
+		-- display button. Its intrinsic XML OnClick calls UseContainerItem(GetParent():GetID(),
+		-- GetID()) before any Lua, so no taint. All textures are cleared so only the
+		-- display button beneath is visible.
+		local displayButton = buttons.toolbar.hearthstone
+
+		local dummyBagFrame = _G.CreateFrame("Frame", ui:CreateElementName("HearthstoneBag"), footer)
+		dummyBagFrame:SetID(0)
+
+		local secureButton = _G.CreateFrame(
+			"Button",
+			ui:CreateElementName("HearthstoneSecure"),
+			dummyBagFrame,
+			"ContainerFrameItemButtonTemplate"
+		)
+
+		-- Clear every texture so the secure button is invisible.
+		local bn = secureButton:GetName()
+		for _, child in ipairs({ _G[bn.."Icon"], _G[bn.."IconTexture"], _G[bn.."Count"], _G[bn.."Stock"], _G[bn.."HighlightFrameTexture"] }) do
+			if child then child:Hide() end
+		end
+		secureButton:SetNormalTexture(nil)
+		secureButton:SetPushedTexture(nil)
+		secureButton:SetHighlightTexture(nil)
+		secureButton:SetDisabledTexture(nil)
+
+		-- Size to match the display button; anchor to cover it exactly.
+		secureButton:SetWidth(displayButton:GetWidth())
+		secureButton:SetHeight(displayButton:GetHeight())
+		secureButton:SetHitRectInsets(-4, -4, -4, -4)
+		secureButton:ClearAllPoints()
+		secureButton:SetPoint("CENTER", displayButton, "CENTER", 0, 0)
+
+		-- Raise above the display button so it intercepts all mouse events.
+		secureButton:SetFrameLevel(displayButton:GetFrameLevel() + 1)
+
+		-- Delegate mouse events to the display button's existing handlers.
+		secureButton:SetScript("OnEnter", function()
+			if self.hearthstoneItemRef then
+				-- Mirror bagshuiData onto displayButton so ItemButton_OnEnter works.
+				displayButton.bagshuiData.bagNum = self.hearthstoneItemRef.bagNum
+				displayButton.bagshuiData.slotNum = self.hearthstoneItemRef.slotNum
+			end
+			displayButton:GetScript("OnEnter")()
+		end)
+		secureButton:SetScript("OnLeave", function()
+			displayButton:GetScript("OnLeave")()
+		end)
+		secureButton:RegisterForDrag("LeftButton")
+		secureButton:SetScript("OnDragStart", function()
+			displayButton:GetScript("OnDragStart")()
+		end)
+		-- PostClick: cursor cleanup after UseContainerItem.
+		_G.BagshuiSetScriptRaw(secureButton, "PostClick", function()
+			if Bagshui:GetCursorItem() == self.hearthstoneItemRef then
+				_G.ClearCursor()
+			end
+		end)
+
+		self.hearthstoneSecureButton = secureButton
+		self.hearthstoneDummyBagFrame = dummyBagFrame
+	end
+
 	-- Even though we always create the hearthstone button, it may not be enabled
 	-- for this class instance.
 	if not self.hearthButton then
 		buttons.toolbar.hearthstone:Hide()
+		self.hearthstoneSecureButton:Hide()
 	end
 
 
@@ -1038,9 +1092,11 @@ function Inventory:InitUi()
 		frames.bottomRightToolbarAnchor,
 		frames.money,
 		-BsSkin.toolbarGroupSpacing,
-		buttons.toolbar.clam,
-		-BsSkin.toolbarGroupSpacing,
 		buttons.toolbar.hearthstone,
+		-BsSkin.toolbarGroupSpacing,
+		buttons.toolbar.clam,
+		buttons.toolbar.pickLock,
+		buttons.toolbar.disenchant,
 	}
 
 
@@ -1273,7 +1329,6 @@ function Inventory:UiFrame_OnShow()
 	self.temporarilyShowWindowHeader = false
 	self.highlightChanges = false
 	self.queuedTradeItem = nil  -- Used by Inventory:TradeFrame_OnShow().
-	self.itemPendingSale = nil  -- Used by Inventory:ItemButton_OnClick() to confirm sale of protected items.
 
 	-- Reset any item highlighting.
 	self.highlightItemsInContainerId = nil

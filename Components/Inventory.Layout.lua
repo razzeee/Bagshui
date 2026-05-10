@@ -2177,12 +2177,21 @@ function Inventory:UpdateToolbar()
 	then
 		toolbarButtons.hearthstone:Show()
 
+		-- Set IDs on the invisible secure button so its intrinsic XML OnClick fires
+		-- UseContainerItem(bagNum, slotNum) taint-free.
+		self.hearthstoneSecureButton:SetID(self.hearthstoneItemRef.slotNum)
+		self.hearthstoneDummyBagFrame:SetID(self.hearthstoneItemRef.bagNum)
+		self.hearthstoneSecureButton:Show()
+
 		-- Display cooldown.
 		local cooldownStart, cooldownDuration, isOnCooldown = _G.GetContainerItemCooldown(self.hearthstoneItemRef.bagNum, self.hearthstoneItemRef.slotNum)
 		self.ui:SetIconButtonCooldown(toolbarButtons.hearthstone, cooldownStart, cooldownDuration, isOnCooldown)
 
 	else
 		toolbarButtons.hearthstone:Hide()
+		if self.hearthstoneSecureButton then
+			self.hearthstoneSecureButton:Hide()
+		end
 	end
 
 	-- Clam (open container) button.
@@ -2201,8 +2210,6 @@ function Inventory:UpdateToolbar()
 			-- Don't allow at Bank because UseContainerItem() moves the item
 			-- instead of opening it.
 			and not Bagshui.components.Bank.atBank
-			-- Avoid messing with item highlighting during a pending sale.
-			and not self.itemPendingSale
 		)
 	)
 
@@ -2266,6 +2273,9 @@ function Inventory:UpdateToolbar()
 	-- Hearthstone
 	if self.hearthButton then
 		self.ui.buttons.toolbar.hearthstone[editModeState](self.ui.buttons.toolbar.hearthstone)
+		if self.hearthstoneSecureButton then
+			self.hearthstoneSecureButton[editModeState](self.hearthstoneSecureButton)
+		end
 	end
 	-- Search
 	self.ui.buttons.toolbar.search[editModeState](self.ui.buttons.toolbar.search)
