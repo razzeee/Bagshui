@@ -922,14 +922,17 @@ function Inventory:InitUi()
 				displayButton.bagshuiData.bagNum = self.hearthstoneItemRef.bagNum
 				displayButton.bagshuiData.slotNum = self.hearthstoneItemRef.slotNum
 			end
-			displayButton:GetScript("OnEnter")()
+			self:ItemButton_OnEnter(displayButton)
 		end)
 		secureButton:SetScript("OnLeave", function()
-			displayButton:GetScript("OnLeave")()
+			self:ItemButton_OnLeave(displayButton)
 		end)
 		secureButton:RegisterForDrag("LeftButton")
 		secureButton:SetScript("OnDragStart", function()
 			displayButton:GetScript("OnDragStart")()
+		end)
+		secureButton:SetScript("OnUpdate", function()
+			self:ItemButton_OnUpdate(_G.arg1, displayButton)
 		end)
 		-- PostClick: cursor cleanup after UseContainerItem.
 		_G.BagshuiSetScriptRaw(secureButton, "PostClick", function()
