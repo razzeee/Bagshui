@@ -1031,7 +1031,7 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 				-- the way it handles attachments.
 				and not _G.IsAddOnLoaded("Mail")
 				and _G.SendMailPackageButton ~= nil
-			and _G.SendMailPackageButton:IsEnabled() == 1
+				and _G.SendMailPackageButton:IsEnabled() == 1
 			then
 				-- Switch to the Send Mail tab and attach the item.
 				self:AttachItem(

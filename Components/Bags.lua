@@ -69,37 +69,8 @@ function Bags:BagSlotButton_Init(bagSlotButton)
 		else
 			oldOnClick(self)
 		end
---- Suppress ElvUI bag module interference.
---- When ElvUI bags are enabled, ElvUI installs SecureHook post-hooks on the bag
---- toggle globals (OpenAllBags, ToggleBag, ToggleBackpack, etc.) that Bagshui has
---- replaced. Those post-hooks call B:ToggleBackpack() / B:ToggleBags() / B:OpenBags()
---- which show/update ElvUI's BagFrame redundantly, causing performance issues
---- (especially when combined with Auctionator's tooltip hooks).
---- We neutralize ElvUI's bag toggle handlers and hide its bag frame so only
---- Bagshui manages bag visibility.
-function Bags:SuppressElvUIBags()
-	local E = _G.ElvUI and _G.ElvUI[1]
-	if not E then return end
-	local B = E:GetModule("Bags", true)
-	if not B or not B.Initialized then return end
 
-	-- Replace ElvUI's toggle/open/close bag functions with no-ops so its
-	-- SecureHook post-hooks do nothing.
-	local noop = function() end
-	B.ToggleBackpack = noop
-	B.ToggleBags = noop
-	B.OpenBags = noop
-	B.CloseBags = noop
-
-	-- Hide ElvUI's bag frame if it exists.
-	if B.BagFrame and B.BagFrame:IsShown() then
-		B.BagFrame:Hide()
-	end
-
-	Bagshui:PrintDebug("ElvUI bag module suppressed")
-end
-
-end)
+	end)
 end
 
 

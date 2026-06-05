@@ -1344,42 +1344,42 @@ function Inventory:AssignItemsToSlots(
 				button.bagshuiData.emptySlot = self.groupItems[groupId][position].emptySlot
 				button.bagshuiData.itemString = self.groupItems[groupId][position].itemString
 
-			-- Update IDs for the shared secure use button.
-			-- SetID and SetParent are protected during combat lockdown; skip them then.
-			-- The IDs/parent are already correct from the previous layout run, so
-			-- item-button interactions remain functional for the duration of combat.
-			if not inCombatLockdown then
-				button:SetID(button.bagshuiData.slotNum)
-				if button.bagshuiData.dummyBagFrame then
-					button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
-					button:SetParent(button.bagshuiData.dummyBagFrame)
-				end
-			elseif button.bagshuiData.dummyBagFrame then
-				-- dummyBagFrame:SetID is safe (plain Frame, not SecureActionButtonTemplate).
-				button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
-			end
-
-			-- Display the item slot button.
-			-- Position dummyBagFrame (the layout container) rather than the button
-			-- directly, so button:SetPoint stays within its own parent hierarchy
-			-- and WotLK doesn't implicitly reparent the button away from dummyBagFrame.
-			if button.bagshuiData.dummyBagFrame then
-				self:ShowFrameInNextPosition(
-					"AssignItemsToSlots",
-					rowNum,
-					button.bagshuiData.dummyBagFrame,
-					itemSlotSize
-				)
-				-- Pin the button to fill dummyBagFrame exactly.
-				-- SetItemButtonSize handles the button's internal scale.
-				self.ui:SetItemButtonSize(button, itemSlotSize)
-				-- ClearAllPoints/SetPoint/Show are protected during combat lockdown.
-				-- The button is already positioned and shown from the previous layout run.
+				-- Update IDs for the shared secure use button.
+				-- SetID and SetParent are protected during combat lockdown; skip them then.
+				-- The IDs/parent are already correct from the previous layout run, so
+				-- item-button interactions remain functional for the duration of combat.
 				if not inCombatLockdown then
-					button:ClearAllPoints()
-					button:SetPoint("CENTER", button.bagshuiData.dummyBagFrame, "CENTER", 0, 0)
-					button:Show()
+					button:SetID(button.bagshuiData.slotNum)
+					if button.bagshuiData.dummyBagFrame then
+						button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
+						button:SetParent(button.bagshuiData.dummyBagFrame)
+					end
+				elseif button.bagshuiData.dummyBagFrame then
+					-- dummyBagFrame:SetID is safe (plain Frame, not SecureActionButtonTemplate).
+					button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
 				end
+
+				-- Display the item slot button.
+				-- Position dummyBagFrame (the layout container) rather than the button
+				-- directly, so button:SetPoint stays within its own parent hierarchy
+				-- and WotLK doesn't implicitly reparent the button away from dummyBagFrame.
+				if button.bagshuiData.dummyBagFrame then
+					self:ShowFrameInNextPosition(
+						"AssignItemsToSlots",
+						rowNum,
+						button.bagshuiData.dummyBagFrame,
+						itemSlotSize
+					)
+					-- Pin the button to fill dummyBagFrame exactly.
+					-- SetItemButtonSize handles the button's internal scale.
+					self.ui:SetItemButtonSize(button, itemSlotSize)
+					-- ClearAllPoints/SetPoint/Show are protected during combat lockdown.
+					-- The button is already positioned and shown from the previous layout run.
+					if not inCombatLockdown then
+						button:ClearAllPoints()
+						button:SetPoint("CENTER", button.bagshuiData.dummyBagFrame, "CENTER", 0, 0)
+						button:Show()
+					end
 				else
 					self:ShowFrameInNextPosition(
 						"AssignItemsToSlots",
