@@ -864,8 +864,7 @@ function Inventory:ItemButton_OnUpdate(elapsed, itemButton)
 		and not btn.bagshuiData._tooltipRestored
 		and btn.bagshuiData.mouseIsOver
 		and btn.bagshuiData.bagNum == _G.BANK_CONTAINER
-		and btn.bagshuiData.item
-		and btn.bagshuiData.item.emptySlot ~= 1
+		and btn.bagshuiData.emptySlot ~= 1
 		and _G.GameTooltip:IsOwned(btn)
 		and _G.GameTooltip:NumLines() <= 1
 	then

@@ -590,6 +590,22 @@ local hookTooltipFunctions = {
 
 	SetBagItem = function(self, bagNum, slotNum)
 		self.bagshuiData.lastItemString = BsItemInfo:ParseItemLink(_G.GetContainerItemLink(bagNum, slotNum))
+		-- For BANK_CONTAINER, SetBagItem(-1, slot) produces broken/incomplete tooltips on
+		-- this server. If the tooltip is owned by a Bagshui bank item button with a valid
+		-- itemString, redirect to SetHyperlink which always returns the correct full tooltip.
+		if bagNum == _G.BANK_CONTAINER then
+			local owner = self:GetOwner()
+			if
+				owner
+				and owner.bagshuiData
+				and owner.bagshuiData.bagNum == _G.BANK_CONTAINER
+				and owner.bagshuiData.emptySlot ~= 1
+				and owner.bagshuiData.itemString
+			then
+				self.bagshuiData.lastItemString = owner.bagshuiData.itemString
+				return self.bagshuiData.hooked.SetHyperlink(self, owner.bagshuiData.itemString)
+			end
+		end
 		return self.bagshuiData.hooked.SetBagItem(self, bagNum, slotNum)
 	end,
 
@@ -639,6 +655,20 @@ local hookTooltipFunctions = {
 
 	SetInventoryItem = function(self, unit, slotNum, nameOnly)
 		self.bagshuiData.lastItemString = BsItemInfo:ParseItemLink(_G.GetInventoryItemLink(unit, slotNum))
+		-- For bank item buttons, SetInventoryItem produces broken/incomplete tooltips on
+		-- this server. If the tooltip is owned by a Bagshui bank item button with a valid
+		-- itemString, redirect to SetHyperlink which always returns the correct full tooltip.
+		local owner = self:GetOwner()
+		if
+			owner
+			and owner.bagshuiData
+			and owner.bagshuiData.bagNum == _G.BANK_CONTAINER
+			and owner.bagshuiData.emptySlot ~= 1
+			and owner.bagshuiData.itemString
+		then
+			self.bagshuiData.lastItemString = owner.bagshuiData.itemString
+			return self.bagshuiData.hooked.SetHyperlink(self, owner.bagshuiData.itemString)
+		end
 		return self.bagshuiData.hooked.SetInventoryItem(self, unit, slotNum, nameOnly)
 	end,
 
@@ -819,13 +849,12 @@ if _G.hooksecurefunc then
 			owner
 			and owner.bagshuiData
 			and owner.bagshuiData.bagNum == _G.BANK_CONTAINER
-			and owner.bagshuiData.item
-			and owner.bagshuiData.item.emptySlot ~= 1
-			and owner.bagshuiData.item.itemString
+			and owner.bagshuiData.emptySlot ~= 1
+			and owner.bagshuiData.itemString
 		then
 			-- The intrinsic just corrupted the tooltip. Restore it via SetHyperlink
 			-- which works correctly for bank items regardless of server quirks.
-			tooltip:SetHyperlink(owner.bagshuiData.item.itemString)
+			tooltip:SetHyperlink(owner.bagshuiData.itemString)
 		end
 	end)
 end

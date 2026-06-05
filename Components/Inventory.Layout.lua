@@ -1339,6 +1339,10 @@ function Inventory:AssignItemsToSlots(
 				button.bagshuiData.bagNum = self.groupItems[groupId][position].bagNum
 				button.bagshuiData.slotNum = self.groupItems[groupId][position].slotNum
 				button.bagshuiData.isEmptySlotStack = isEmptySlotStack
+				-- Cache emptySlot and itemString so tooltip hooks (Bagshui.Tooltips.lua)
+				-- can access them without needing bagshuiData.item to be set.
+				button.bagshuiData.emptySlot = self.groupItems[groupId][position].emptySlot
+				button.bagshuiData.itemString = self.groupItems[groupId][position].itemString
 
 			-- Update IDs for the shared secure use button.
 			-- SetID and SetParent are protected during combat lockdown; skip them then.
