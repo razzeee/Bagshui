@@ -1631,6 +1631,12 @@ end
 ---@param forceCallOriginalHook boolean? When true, always call the hooked API function.
 function Inventory:OpenCloseToggle(uiVisibilityAction, wowApiFunctionName, bagNumParam, forceCallOriginalHook)
 
+	-- Normalize boolean bagNumParam to nil: some addons (e.g. Auctionator) call
+	-- OpenAllBags(true) where true means "force open", not a bag number.
+	if type(bagNumParam) == "boolean" then
+		bagNumParam = nil
+	end
+
 	local callOriginalHook = true
 	if self:GetHookEnabled(wowApiFunctionName, bagNumParam) then
 		callOriginalHook = false

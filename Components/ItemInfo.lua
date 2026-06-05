@@ -481,16 +481,19 @@ function ItemInfo:LoadTooltip(tooltipFrame, item, inventory, forceItemString)
 		-- Inventory configurations can provide a function that translates the item's slotNum
 		-- from the sequential 0-N bag slot to the global inventory slot number when
 		-- they need to use SetInventoryItem() instead of SetBagItem().
-		if
+		-- Guard: if the function returns the same value as the input it's a no-op on
+		-- this server (BankButtonIDToInvSlotID returns n unchanged instead of n+67),
+		-- so fall through to SetBagItem() which works correctly.
+		local inventorySlot = (
 			inventory
 			and inventory.primaryContainer.id == item.bagNum
 			and inventory.getInventorySlotFunction
-		then
-
-			-- SetInventoryItem() returns hasItem, hasCooldown, repairCost.
+			and inventory.getInventorySlotFunction(item.slotNum)
+		)
+		if inventorySlot and inventorySlot ~= item.slotNum then
 			_, hasCooldown, repairCost = tooltipFrame:SetInventoryItem(
 				"player",
-				inventory.getInventorySlotFunction(item.slotNum)
+				inventorySlot
 			)
 		else
 			hasCooldown, repairCost = tooltipFrame:SetBagItem(item.bagNum, item.slotNum)

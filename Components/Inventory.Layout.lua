@@ -26,6 +26,14 @@ function Inventory:Update(cascade)
 		return
 	end
 
+	-- During combat, some frame operations on ContainerFrameItemButtonTemplate buttons are
+	-- protected (SetScale, Show, Hide, SetParent, SetID) and must be skipped to avoid taint
+	-- errors. The full update pipeline still runs; guarded call sites skip those ops.
+	-- A full clean update is also queued for after combat to catch anything that was skipped.
+	if _G.InCombatLockdown and _G.InCombatLockdown() then
+		self.updateDeferredForCombat = true
+	end
+
 	-- Update is only needed if the window is visible.
 	if not self:Visible() and not self.forceCacheUpdate then
 		self.windowUpdateBlocked = false
@@ -1001,7 +1009,15 @@ function Inventory:UpdateWindow()
 		local itemSlotButtonCount = table.getn(uiButtons.itemSlots)
 		if currentItemSlotButtonNum <= itemSlotButtonCount then
 			for buttonNum = currentItemSlotButtonNum, itemSlotButtonCount do
-				uiButtons.itemSlots[buttonNum]:Hide()
+				local surplusBtn = uiButtons.itemSlots[buttonNum]
+				-- button:Hide() is protected during combat; hide via dummyBagFrame instead.
+				if _G.InCombatLockdown and _G.InCombatLockdown() then
+					if surplusBtn.bagshuiData and surplusBtn.bagshuiData.dummyBagFrame then
+						surplusBtn.bagshuiData.dummyBagFrame:Hide()
+					end
+				else
+					surplusBtn:Hide()
+				end
 			end
 		end
 		for i = uiGroupNum, table.getn(uiFrames.groups) do
@@ -1232,6 +1248,7 @@ function Inventory:AssignItemsToSlots(
 	local genericBagType
 	local button
 	local isEmptySlotStack
+	local inCombatLockdown = _G.InCombatLockdown and _G.InCombatLockdown()
 
 	-- We need the real item count here to be able to step through all items.
 	-- (Using the count for layout from upstream won't work if empty slot
@@ -1323,33 +1340,42 @@ function Inventory:AssignItemsToSlots(
 				button.bagshuiData.slotNum = self.groupItems[groupId][position].slotNum
 				button.bagshuiData.isEmptySlotStack = isEmptySlotStack
 
-				-- Update IDs for the shared secure use button.
-				-- SetID is safe outside combat; layout only runs outside combat.
+			-- Update IDs for the shared secure use button.
+			-- SetID and SetParent are protected during combat lockdown; skip them then.
+			-- The IDs/parent are already correct from the previous layout run, so
+			-- item-button interactions remain functional for the duration of combat.
+			if not inCombatLockdown then
 				button:SetID(button.bagshuiData.slotNum)
 				if button.bagshuiData.dummyBagFrame then
 					button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
-					-- SetParent to dummyBagFrame at layout time (Bagnon pattern).
-					-- Layout runs outside combat so SetParent is safe.
 					button:SetParent(button.bagshuiData.dummyBagFrame)
 				end
+			elseif button.bagshuiData.dummyBagFrame then
+				-- dummyBagFrame:SetID is safe (plain Frame, not SecureActionButtonTemplate).
+				button.bagshuiData.dummyBagFrame:SetID(button.bagshuiData.bagNum)
+			end
 
-				-- Display the item slot button.
-				-- Position dummyBagFrame (the layout container) rather than the button
-				-- directly, so button:SetPoint stays within its own parent hierarchy
-				-- and WotLK doesn't implicitly reparent the button away from dummyBagFrame.
-				if button.bagshuiData.dummyBagFrame then
-					self:ShowFrameInNextPosition(
-						"AssignItemsToSlots",
-						rowNum,
-						button.bagshuiData.dummyBagFrame,
-						itemSlotSize
-					)
-					-- Pin the button to fill dummyBagFrame exactly.
-					-- SetItemButtonSize handles the button's internal scale.
-					self.ui:SetItemButtonSize(button, itemSlotSize)
+			-- Display the item slot button.
+			-- Position dummyBagFrame (the layout container) rather than the button
+			-- directly, so button:SetPoint stays within its own parent hierarchy
+			-- and WotLK doesn't implicitly reparent the button away from dummyBagFrame.
+			if button.bagshuiData.dummyBagFrame then
+				self:ShowFrameInNextPosition(
+					"AssignItemsToSlots",
+					rowNum,
+					button.bagshuiData.dummyBagFrame,
+					itemSlotSize
+				)
+				-- Pin the button to fill dummyBagFrame exactly.
+				-- SetItemButtonSize handles the button's internal scale.
+				self.ui:SetItemButtonSize(button, itemSlotSize)
+				-- ClearAllPoints/SetPoint/Show are protected during combat lockdown.
+				-- The button is already positioned and shown from the previous layout run.
+				if not inCombatLockdown then
 					button:ClearAllPoints()
 					button:SetPoint("CENTER", button.bagshuiData.dummyBagFrame, "CENTER", 0, 0)
 					button:Show()
+				end
 				else
 					self:ShowFrameInNextPosition(
 						"AssignItemsToSlots",
@@ -1804,8 +1830,13 @@ function Inventory:UpdateBagBar()
 	-- We always need to do one loop through the bag buttons to refresh the appearance and make some decisions.
 	for _, bagSlotButton in ipairs(self.ui.buttons.bagSlots) do
 
+		-- Skip buttons that have been hidden (e.g. bank slots beyond server max).
+		if not bagSlotButton:IsShown() then
+			-- continue
+		else
+
 		-- Set button textures -- necessary for them to be correct when viewing another character's inventory.
-		_G.SetItemButtonTexture(bagSlotButton, self.containers[bagSlotButton.bagshuiData.bagNum].texture)
+		_G.SetItemButtonTexture(bagSlotButton, self.containers[bagSlotButton.bagshuiData.bagNum] and self.containers[bagSlotButton.bagshuiData.bagNum].texture)
 
 		-- Locked highlight border.
 		if self.highlightItemsInContainerLocked == bagSlotButton.bagshuiData.bagNum then
@@ -1885,6 +1916,7 @@ function Inventory:UpdateBagBar()
 			showUsageSummary = true
 		end
 
+		end -- skip hidden buttons
 	end
 
 	-- Also display free space information when the mouse is over the summary area.
@@ -1917,8 +1949,15 @@ function Inventory:UpdateBagBar()
 
 	-- Gether free space information.
 	for _, bagSlotButton in ipairs(self.ui.buttons.bagSlots) do
+		-- Skip buttons that have been hidden (e.g. bank slots beyond server max).
+		if not bagSlotButton:IsShown() then
+			-- continue
+		else
 		-- Step through bag slot buttons and determine available/used/total space.
 		local container = self.containers[bagSlotButton.bagshuiData.bagNum]
+		if not container then
+			-- continue
+		else
 		local available, used = 0, 0
 		local slotText = ""
 		if container.numSlots > 0 then
@@ -1956,6 +1995,8 @@ function Inventory:UpdateBagBar()
 		self.availableSlots = self.availableSlots + available
 		self.usedSlots = self.usedSlots + used
 		self.totalSlots = self.totalSlots + container.numSlots
+		end -- container nil check
+		end -- skip hidden buttons
 	end
 
 	-- Figure out what to display in the summary based on settings.

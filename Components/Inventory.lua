@@ -253,6 +253,7 @@ function Inventory:New(newPropsOrInventoryType)
 		events = {
 			PLAYER_LOGIN = true,
 			PLAYER_ENTERING_WORLD = true,
+			PLAYER_REGEN_ENABLED = true,
 			BAG_UPDATE = true,
 			BAG_UPDATE_COOLDOWN = true,
 			ITEM_LOCKED = true,  -- Doesn't seem to actually ever fire but let's register for it anyway.
@@ -698,16 +699,17 @@ function Inventory:OnEvent(event, arg1, arg2)
 		return
 	end
 
-	-- BAG_UPDATE: Don't do anything if arg1 is for a bag not handled by this class.
-	if event == "BAG_UPDATE" and not self.myContainerIds[arg1] then
+	-- After combat ends, re-run any update that was deferred due to combat lockdown.
+	if event == "PLAYER_REGEN_ENABLED" then
+		if self.updateDeferredForCombat then
+			self.updateDeferredForCombat = false
+			self:QueueUpdate()
+		end
 		return
 	end
 
-
-	-- MERCHANT_CLOSED: Clear pending sale item.
-	-- We also clear this when the window is opened but this is here just to be safe.
-	if event == "MERCHANT_CLOSED" then
-		self:ClearItemPendingSale()
+	-- BAG_UPDATE: Don't do anything if arg1 is for a bag not handled by this class.
+	if event == "BAG_UPDATE" and not self.myContainerIds[arg1] then
 		return
 	end
 

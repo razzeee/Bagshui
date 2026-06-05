@@ -207,6 +207,9 @@ end
 function Ui:CreateItemButtonCooldown(button, disableText)
 	local cooldown = _G.CreateFrame("Model", button:GetName() .. "Cooldown", button, "CooldownFrameTemplate")
 	cooldown:SetFrameLevel(cooldown:GetFrameLevel() + 1)  -- Move above NormalTexture.
+	-- Model frames enable mouse by default on WotLK, which blocks OnEnter/OnLeave
+	-- on the parent button. Cooldown frames should never intercept mouse events.
+	cooldown:EnableMouse(false)
 	-- Pretend we're a pfUI frame so we can get pfUI cooldown text without the 
 	-- "Foreign Frames" option (so long as the pfUI cooldown module is enabled).
 	if pfUI and pfUI.env.C.disabled and pfUI.env.C.disabled.cooldown ~= "1" then
@@ -355,6 +358,7 @@ function Ui:SkinItemButton(button, buttonType)
 	-- Credit: [ShaguTweaks AddBorder()](https://github.com/shagu/ShaguTweaks/blob/master/helpers.lua).
 	buttonComponents.border = _G.CreateFrame("Frame", nil, button)
 	buttonComponents.border:SetFrameLevel(buttonComponents.border:GetFrameLevel() + 3) -- Borders will end up under normalTexture without this.
+	buttonComponents.border:EnableMouse(false)  -- Never intercept mouse events.
 	buttonComponents.border:SetPoint("TOPLEFT", button, "TOPLEFT", -BsSkin.itemSlotBorderAnchor, BsSkin.itemSlotBorderAnchor)
 	buttonComponents.border:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", BsSkin.itemSlotBorderAnchor, -BsSkin.itemSlotBorderAnchor)
 	buttonInfo.borderBackdropTable = {
@@ -1094,7 +1098,11 @@ end
 ---@return number scale
 function Ui:SetItemButtonSize(button, newSize)
 	button.bagshuiData.scale = self:GetItemButtonScale(button, newSize)
-	button:SetScale(button.bagshuiData.scale)
+	-- SetScale is protected during combat lockdown; skip it entirely.
+	-- updateDeferredForCombat ensures a full re-layout (including SetScale) runs post-combat.
+	if not (_G.InCombatLockdown and _G.InCombatLockdown()) then
+		button:SetScale(button.bagshuiData.scale)
+	end
 
 	self:InvertItemButtonBorderScale(button)
 

@@ -123,6 +123,28 @@ end
 
 
 
+--- Hide ElvUI's bank container frame if it is shown on top of Bagshui.
+--- ElvUI registers BANKFRAME_OPENED independently and calls B:OpenBank() which
+--- shows ElvUI_BankContainerFrame on top of Bagshui's bank window, blocking
+--- mouse events on item buttons. We defer by one frame so we always run after
+--- ElvUI's handler regardless of event registration order.
+function Bank:SuppressElvUIBankFrames()
+	if self.settings.replaceBank == false then return end
+	if not self._elvuiSuppressTicker then
+		self._elvuiSuppressTicker = _G.CreateFrame("Frame")
+	end
+	local ticker = self._elvuiSuppressTicker
+	ticker:SetScript("OnUpdate", function()
+		ticker:SetScript("OnUpdate", nil)
+		local elvBank = _G["ElvUI_BankContainerFrame"]
+		if elvBank and elvBank:IsShown() then
+			elvBank:Hide()
+		end
+	end)
+end
+
+
+
 --- Minor override to `Inventory:UpdateOnlineStatus()` so that online status will
 --- match atBank status if the player arrives at or leaves the bank while
 --- the window is open.
@@ -226,6 +248,9 @@ function Bank:UpdateBagSlotPurchaseStatus(bagSlotButton, numSlotsPurchased, allS
 		return
 	end
 	-- `<button>.bagshuiData.bagSlotNum` is the sequential bag slot number as set in InventoryUi:CreateBagSlotButtons().
+	if not self.containers[bagSlotButton.bagshuiData.bagNum] then
+		return
+	end
 	self.containers[bagSlotButton.bagshuiData.bagNum].purchased = (
 			allSlotsPurchased
 			or bagSlotButton.bagshuiData.bagSlotNum <= numSlotsPurchased
@@ -243,47 +268,82 @@ end
 
 --- Add special bag bar handling for bank slots because they're purchasable.
 function Bank:UpdateBagBar()
+	-- If we're physically at the bank but online status hasn't been reconciled yet
+	-- (e.g. UpdateBagBar fired before UpdateOnlineStatus settled), queue a retry.
+	if self.atBank and not self.online then
+		self:QueueUpdate()
+	end
+
 	local tooltipText, textureColor
 	local numSlotsPurchased, allSlotsPurchased = _G.GetNumBankSlots()
+	-- GetNumBankSlots() can return nil (same guard as UpdateBagSlotPurchaseStatus).
+	-- Skip the loop entirely rather than wasting iterations that all short-circuit.
+	if numSlotsPurchased == nil then
+		-- If we're online (at the bank), queue a retry so the purchase UI appears
+		-- once the API is ready, rather than silently falling back to default rendering.
+		-- Limit retries to avoid an infinite loop if GetNumBankSlots() never returns data.
+		self._updateBagBarNilRetries = (self._updateBagBarNilRetries or 0) + 1
+		if self.online and self._updateBagBarNilRetries <= 5 then
+			self:QueueUpdate()
+		end
+		self._super.UpdateBagBar(self)
+		return
+	end
+	self._updateBagBarNilRetries = 0
+
+	-- Calculate how many bag slot buttons to show:
+	-- - All purchased slots are always shown.
+	-- - When not all slots are purchased, show one extra (the next purchasable slot).
+	-- - When all slots are purchased, numSlotsPurchased is the server's maximum.
+	-- This correctly hides extra buttons we created for padding beyond the server's max.
+	local maxVisibleBagSlots = allSlotsPurchased and numSlotsPurchased or (numSlotsPurchased + 1)
 
 	for _, bagSlotButton in ipairs(self.ui.buttons.bagSlots) do
 
 		-- The primary bank slot is never purchasable.
 		if not bagSlotButton.bagshuiData.primary then
-			self:UpdateBagSlotPurchaseStatus(bagSlotButton, numSlotsPurchased, allSlotsPurchased)
 
-			if self.containers[bagSlotButton.bagshuiData.bagNum].purchased then
-				-- Slot has been purchased.
-				tooltipText = _G.BANK_BAG
-				textureColor = BS_COLOR.WHITE
-
-			elseif self.containers[bagSlotButton.bagshuiData.bagNum].nextPurchasable and self.online then
-				-- Slot is next up for purchase.
-				tooltipText = _G.BANKSLOTPURCHASE .. " " .. _G.BANK_BAG
-				textureColor = BS_COLOR.DARK_GREEN
-
+			-- Hide buttons for slots beyond what this server supports.
+			if bagSlotButton.bagshuiData.bagSlotNum > maxVisibleBagSlots then
+				bagSlotButton:Hide()
 			else
-				-- Slot is not yet purchasable.
-				tooltipText = _G.BANK_BAG_PURCHASE
-				textureColor = BS_COLOR.DARK_RED
-			end
+				bagSlotButton:Show()
 
-			-- This will be picked up by `Inventory:ShowBagSlotTooltip()`.
-			bagSlotButton.tooltipText = tooltipText
+				self:UpdateBagSlotPurchaseStatus(bagSlotButton, numSlotsPurchased, allSlotsPurchased)
 
-			-- Set the slot button texture color.
-			_G.SetItemButtonTextureVertexColor(bagSlotButton, textureColor[1], textureColor[2], textureColor[3])
+				if self.containers[bagSlotButton.bagshuiData.bagNum] and self.containers[bagSlotButton.bagshuiData.bagNum].purchased then
+					-- Slot has been purchased.
+					tooltipText = _G.BANK_BAG
+					textureColor = BS_COLOR.WHITE
 
-			-- Set the background texture color.
-			if bagSlotButton.bagshuiData.buttonComponents.background then
-				bagSlotButton.bagshuiData.buttonComponents.background:SetVertexColor(textureColor[1], textureColor[2], textureColor[3])
-			end
+				elseif self.containers[bagSlotButton.bagshuiData.bagNum] and self.containers[bagSlotButton.bagshuiData.bagNum].nextPurchasable and self.online then
+					-- Slot is next up for purchase.
+					tooltipText = _G.BANKSLOTPURCHASE .. " " .. _G.BANK_BAG
+					textureColor = BS_COLOR.DARK_GREEN
 
-			-- Use cached bag texture offline.
-			if not self.online and self.containers[bagSlotButton.bagshuiData.bagNum].texture then
-				_G.SetItemButtonTexture(bagSlotButton, self.containers[bagSlotButton.bagshuiData.bagNum].texture)
-			end
+				else
+					-- Slot is not yet purchasable.
+					tooltipText = _G.BANK_BAG_PURCHASE
+					textureColor = BS_COLOR.DARK_RED
+				end
 
+				-- This will be picked up by `Inventory:ShowBagSlotTooltip()`.
+				bagSlotButton.tooltipText = tooltipText
+
+				-- Set the slot button texture color.
+				_G.SetItemButtonTextureVertexColor(bagSlotButton, textureColor[1], textureColor[2], textureColor[3])
+
+				-- Set the background texture color.
+				if bagSlotButton.bagshuiData.buttonComponents.background then
+					bagSlotButton.bagshuiData.buttonComponents.background:SetVertexColor(textureColor[1], textureColor[2], textureColor[3])
+				end
+
+				-- Use cached bag texture offline.
+				if not self.online and self.containers[bagSlotButton.bagshuiData.bagNum] and self.containers[bagSlotButton.bagshuiData.bagNum].texture then
+					_G.SetItemButtonTexture(bagSlotButton, self.containers[bagSlotButton.bagshuiData.bagNum].texture)
+				end
+
+			end -- server max slots check
 		end
 
 	end
@@ -313,6 +373,12 @@ function Bank:Open()
 	end
 
 	self._super.Open(self)
+
+	-- ElvUI also registers BANKFRAME_OPENED and shows ElvUI_BankContainerFrame
+	-- (and ElvUI_ContainerFrame for bags) on top of Bagshui's bank window.
+	-- Since event handler order is not guaranteed, defer the hide by one frame
+	-- so we run after ElvUI's OpenBank() regardless of registration order.
+	self:SuppressElvUIBankFrames()
 end
 
 
@@ -328,6 +394,7 @@ function Bank:Close()
 	if self.atBank then
 		self.atBank = (currentEvent ~= "BANKFRAME_CLOSED")
 	end
+	self._updateBagBarNilRetries = 0
 	self.windowUpdateNeeded = true
 	self:Update()
 
@@ -347,7 +414,7 @@ end
 --- the bank again until the UI is reloaded.
 function Bank:UiFrame_OnHide()
 	self._super.UiFrame_OnHide(self)
-	if self.settings.replaceBank then
+	if self.settings.replaceBank ~= false then
 		_G.CloseBankFrame()
 	end
 	self.atBank = false

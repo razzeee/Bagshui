@@ -231,7 +231,9 @@ function InventoryUi:CreateBagSlotButtons()
 
 			-- Safeguard to prevent tooltips from popping up when the mouse has already left.
 			if not btn.bagshuiData.mouseIsOver then
-				btn.bagshuiData.tooltipCooldownUpdate = nil
+				if btn.bagshuiData.tooltipCooldownUpdate ~= nil then
+					btn.bagshuiData.tooltipCooldownUpdate = nil
+				end
 				return
 			end
 
@@ -290,8 +292,10 @@ function InventoryUi:CreateBagSlotButtons()
 				inventory:UpdateBagBar()
 				-- When the highlight lock is changed, we need to do a full window update
 				-- so hidden items in this bag can be shown or hidden.
+				-- Defer to break out of the secure OnClick context and avoid SetScale() taint.
 				if oldHighlightItemsInContainerLocked ~= inventory.highlightItemsInContainerLocked then
-					inventory:ForceUpdateWindow()
+					inventory.windowUpdateNeeded = true
+					inventory:QueueUpdate()
 				else
 					inventory:UpdateItemSlotColors()
 				end
@@ -451,7 +455,9 @@ function Inventory:BagSlotButton_OnHook(wowApiFunctionName)
 		return
 	end
 	self.hooks:OriginalHook(wowApiFunctionName)
-	self:Update()
+	-- Defer to break out of the secure OnClick context and avoid SetScale() taint.
+	self.windowUpdateNeeded = true
+	self:QueueUpdate()
 end
 
 
@@ -506,7 +512,12 @@ function Inventory:ShowBagSlotTooltip(bagSlotButton)
 		-- Not using return value 1 (hasItem) because it's automatically captured into
 		-- the button's hasItem property by Blizzard code when an event that changes
 		-- bags fires.
-		_, hasCooldown = _G.GameTooltip:SetInventoryItem("player", this.bagshuiData.inventorySlotId)
+		-- Use pcall to guard against invalid inventory slot IDs (e.g. BankButtonIDToInvSlotID
+		-- returning an out-of-range value on some servers).
+		local ok, hasItem, cooldown = pcall(_G.GameTooltip.SetInventoryItem, _G.GameTooltip, "player", this.bagshuiData.inventorySlotId)
+		if ok then
+			hasCooldown = cooldown
+		end
 	end
 
 	-- Trigger the OnUpdate function to reload the tooltip after 1 second if there's an active cooldown.

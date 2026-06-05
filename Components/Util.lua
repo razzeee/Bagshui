@@ -52,7 +52,7 @@ function Util.Split(str, delimiter, delimiterIsPattern, includeEmpty)
 
 	str = string.gsub(str, delimiter, "\1")
 
-	for match in string.gfind(str, "([^\1]" .. (includeEmpty and "*" or "+") .. ")") do
+	for match in (string.gmatch or string.gfind)(str, "([^\1]" .. (includeEmpty and "*" or "+") .. ")") do
 		table.insert(split_ReturnTable, match)
 	end
 

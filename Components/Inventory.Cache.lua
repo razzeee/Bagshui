@@ -127,7 +127,9 @@ function Inventory:UpdateCache()
 				bagSlotLink = _G.GetInventoryItemLink("player", inventoryId)
 				if bagSlotLink ~= nil then
 					_, _, bagItemCode = string.find(bagSlotLink, "(%d+):")
-					_, _, _, _, _, bagType, _, _, bagTexture = _G.GetItemInfo(bagItemCode)
+					-- GetItemInfo on WotLK returns an extra itemLevel at position 4.
+					-- Positions: name, link, rarity, itemLevel, minLevel, type, subType, stackCount, equipLoc, texture
+					_, _, _, _, _, bagType, _, _, _, bagTexture = _G.GetItemInfo(bagItemCode)
 				end
 			end
 		end

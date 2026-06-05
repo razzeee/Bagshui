@@ -95,7 +95,14 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 			slotButton:RegisterForDrag("LeftButton")
 
 			-- Use PostClick so template's secure OnClick (UseContainerItem) fires first.
-			slotButton:SetScript("PostClick", inventory._itemSlotButton_ScriptWrapper_OnClick)
+			-- Use BagshuiSetScriptRaw (bypasses the WotLK shim) to avoid writing _G.this
+			-- inside the secure PostClick context, which would cause taint that propagates
+			-- to SetScale() calls and triggers "prevented the call of the secure function" errors.
+			if _G.BagshuiSetScriptRaw then
+				_G.BagshuiSetScriptRaw(slotButton, "PostClick", inventory._itemSlotButton_ScriptWrapper_OnClick)
+			else
+				slotButton:SetScript("PostClick", inventory._itemSlotButton_ScriptWrapper_OnClick)
+			end
 			slotButton:SetScript("OnDragStart", inventory._itemSlotButton_ScriptWrapper_OnDragStart)
 			slotButton:SetScript("OnReceiveDrag", inventory._itemSlotButton_ScriptWrapper_OnReceiveDrag)
 			slotButton:SetScript("OnUpdate", inventory._itemSlotButton_ScriptWrapper_OnUpdate)
@@ -386,7 +393,12 @@ function Inventory:ItemButton_OnEnter(itemButton)
 			-- There doesn't seem to be a way to get hasCooldown/repairCost without
 			-- loading the tooltip, so we have to call this even if there's an
 			-- itemSlotTooltipFunction that's going to load it again.
-			hasCooldown, repairCost = BsItemInfo:LoadTooltip(_G.GameTooltip, item, self)
+			-- For BANK_CONTAINER items, SetBagItem(-1, slot) and SetInventoryItem() both
+			-- produce broken/incomplete tooltips on this server. Force SetHyperlink() via
+			-- itemString instead, which always returns the correct full item tooltip.
+			hasCooldown, repairCost = BsItemInfo:LoadTooltip(_G.GameTooltip, item, self,
+				item.bagNum == _G.BANK_CONTAINER or nil
+			)
 
 			-- This class instance has a custom tooltip loading function.
 			-- Spoiler: It's probably ContainerFrameItemButton_OnEnter().
@@ -525,7 +537,6 @@ function Inventory:ItemButton_OnEnter(itemButton)
 			BsSettings.showInfoTooltipsWithoutAlt
 			and not _G.IsShiftKeyDown()
 		)
-		or self.itemPendingSale
 	then
 
 		-- 4th parameter: Always place the info tooltip under GameTooltip in edit mode.
@@ -539,23 +550,12 @@ function Inventory:ItemButton_OnEnter(itemButton)
 				-- Populate the tooltip.
 				if
 					_G.IsControlKeyDown()
-					and not self.itemPendingSale
 				then
 					-- All item properties.
 					BsItemInfo:AddTooltipInfo(item, BsInfoTooltip)
 
 				else
 					-- Normal mode.
-
-					-- Sell protection confirmation instructions.
-					if
-						self.ui:IsFrameVisible("MerchantFrame")
-						and self.itemPendingSale == item
-					then
-						self:AddBagshuiInfoTooltipLine(BS_FONT_COLOR.UI_ORANGE .. L.Inventory_Item_SellProtection_ConfirmSale .. FONT_COLOR_CODE_CLOSE)
-						self:AddBagshuiInfoTooltipLine(LIGHTYELLOW_FONT_COLOR_CODE .. string.format(L.Inventory_Item_SellProtection_Reason, self:GetItemSellProtectionReason(item) or "") .. FONT_COLOR_CODE_CLOSE)
-						self:AddBagshuiInfoTooltipLine(GRAY_FONT_COLOR_CODE .. L.Inventory_Item_SellProtection_OverrideHint .. FONT_COLOR_CODE_CLOSE)
-					end
 
 					-- Inventory counts.
 					BsCatalog:AddTooltipInfo(item.itemString, BsInfoTooltip)
@@ -751,16 +751,19 @@ function Inventory:ItemButton_OnLeave(itemButton)
 	end
 
 	-- Reset tracking properties.
-	itemButton.bagshuiData.tooltipCooldownUpdate = nil
-	itemButton.bagshuiData.altKeyDown = nil
-	itemButton.bagshuiData.controlKeyDown = nil
-	itemButton.bagshuiData.shiftKeyDown = nil
+	if itemButton.bagshuiData then
+		itemButton.bagshuiData.tooltipCooldownUpdate = nil
+		itemButton.bagshuiData.altKeyDown = nil
+		itemButton.bagshuiData.controlKeyDown = nil
+		itemButton.bagshuiData.shiftKeyDown = nil
+		itemButton.bagshuiData._tooltipRestored = nil
 
-	-- Record that the mouse has left this button (used by OnUpdate to determine
-	-- whether the tooltip should be shown when the Edit Mode cursor puts down an item).
-	-- This is used instead of MouseIsOver() because that function returns true
-	-- even when the frame is behind other frames.
-	itemButton.bagshuiData.mouseIsOver = false
+		-- Record that the mouse has left this button (used by OnUpdate to determine
+		-- whether the tooltip should be shown when the Edit Mode cursor puts down an item).
+		-- This is used instead of MouseIsOver() because that function returns true
+		-- even when the frame is behind other frames.
+		itemButton.bagshuiData.mouseIsOver = false
+	end
 
 	-- Hide the main tooltip.
 	if _G.GameTooltip:IsOwned(itemButton) then
@@ -827,11 +830,19 @@ function Inventory:ItemButton_OnUpdate(elapsed, itemButton)
 	end
 
 	-- Clear state tracking variables when the mouse isn't present.
+	-- Only write nils on the first frame after leaving to avoid redundant
+	-- table writes on every frame for all ~160 non-hovered item buttons.
 	if not btn.bagshuiData.mouseIsOver then
-		btn.bagshuiData.tooltipCooldownUpdate = nil
-		btn.bagshuiData.altKeyDown = nil
-		btn.bagshuiData.controlKeyDown = nil
-		btn.bagshuiData.shiftKeyDown = nil
+		if btn.bagshuiData.tooltipCooldownUpdate ~= nil
+			or btn.bagshuiData.altKeyDown ~= nil
+			or btn.bagshuiData.controlKeyDown ~= nil
+			or btn.bagshuiData.shiftKeyDown ~= nil
+		then
+			btn.bagshuiData.tooltipCooldownUpdate = nil
+			btn.bagshuiData.altKeyDown = nil
+			btn.bagshuiData.controlKeyDown = nil
+			btn.bagshuiData.shiftKeyDown = nil
+		end
 		return
 	end
 
@@ -841,6 +852,25 @@ function Inventory:ItemButton_OnUpdate(elapsed, itemButton)
 	-- More Edit Mode help - display tooltips as soon as the cursor no longer holds an item.
 	if self.editMode and btn.bagshuiData.mouseIsOver and not _G.GameTooltip:IsOwned(btn) then
 		itemButton_OnUpdate_RefreshTooltip = true
+	end
+
+	-- On WotLK, ContainerFrameItemButton_OnEnter is a template intrinsic that fires
+	-- AFTER our SetScript OnEnter handler and overwrites the tooltip for BANK_CONTAINER
+	-- items (calls SetInventoryItem which returns no useful data on this server).
+	-- Detect this by checking if the tooltip has only 1 line while the mouse is over
+	-- a bank item button that has an item, and force a refresh to restore correct tooltip.
+	if
+		not itemButton_OnUpdate_RefreshTooltip
+		and not btn.bagshuiData._tooltipRestored
+		and btn.bagshuiData.mouseIsOver
+		and btn.bagshuiData.bagNum == _G.BANK_CONTAINER
+		and btn.bagshuiData.item
+		and btn.bagshuiData.item.emptySlot ~= 1
+		and _G.GameTooltip:IsOwned(btn)
+		and _G.GameTooltip:NumLines() <= 1
+	then
+		itemButton_OnUpdate_RefreshTooltip = true
+		btn.bagshuiData._tooltipRestored = true  -- Only retry once per hover.
 	end
 
 	-- Update cooldown info in tooltip.
@@ -944,24 +974,15 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 			then
 				self.expandEmptySlotStacks = buttonInfo.isEmptySlotStack
 				self:ItemButton_OnLeave()
-				self:ForceUpdateWindow()
+				-- Defer the update to break out of the secure PostClick execution context
+				-- and avoid "prevented the call of the secure function SetScale()" taint.
+				self.windowUpdateNeeded = true
+				self:QueueUpdate()
 				return
 			end
 
 			-- Can't do anything else offline.
 			if not self.online then
-				return
-			end
-
-			-- Reset pending item sale.
-			if
-				self.itemPendingSale
-				and (
-					mouseButton == "LeftButton"
-					or self.itemPendingSale ~= item
-				)
-			then
-				self:ClearItemPendingSale(itemButton)
 				return
 			end
 
@@ -1005,55 +1026,13 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 
 
 			elseif
-				-- Sell protection: Trigger confirmation prompt.
-				self.ui:IsFrameVisible("MerchantFrame")
-				and mouseButton == "RightButton"
-				and not _G.IsControlKeyDown()
-				and not (
-					_G.IsControlKeyDown()
-					and _G.IsAltKeyDown()
-					and _G.IsShiftKeyDown()
-				)
-				and self:GetItemSellProtectionReason(item)
-			then
-				self.itemPendingSale = item
-				self.highlightItemsInContainerId = item.bagNum
-				self.highlightItemsContainerSlot = item.slotNum
-				self:ItemButton_OnEnter(itemButton)
-				self:UpdateItemSlotColors()
-				-- Don't let default actions happen because we don't want the tooltip hidden.
-				return
-
-
-			elseif
-				-- Sell protection: Sale confirmed.
-				self.ui:IsFrameVisible("MerchantFrame")
-				and (
-					-- Confirming the previously-selected item.
-					(
-						self.itemPendingSale == item
-						and mouseButton == "RightButton"
-						and _G.IsControlKeyDown()
-					)
-					or
-					-- All modifiers down to bypass sale protection.
-					(
-						_G.IsControlKeyDown()
-						and _G.IsAltKeyDown()
-						and _G.IsShiftKeyDown()
-					)
-				)
-			then
-				self:ContainerItemAction(item, "Use", false)
-
-
-			elseif
 				-- Blizzard Mail Attachments - Right-click/Alt+click.
 				self:IsItemClickActionAllowed(mouseButton, "InboxFrame", "SendMailFrame")
 				-- Doing two checks here for "Mail" addon in case another addon ends up replicating
 				-- the way it handles attachments.
 				and not _G.IsAddOnLoaded("Mail")
-				and _G.SendMailPackageButton:IsEnabled() == 1
+				and _G.SendMailPackageButton ~= nil
+			and _G.SendMailPackageButton:IsEnabled() == 1
 			then
 				-- Switch to the Send Mail tab and attach the item.
 				self:AttachItem(
@@ -1214,18 +1193,18 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 						Bagshui:PickupItem(item, self, itemButton, true)
 
 					elseif not isDrag and item.itemLink and (_G.IsControlKeyDown() or _G.IsShiftKeyDown()) then
-						-- Handle modified clicks (dress-up, chat links) directly.
-						-- Template already attempted these; this is a fallback.
-						if _G.HandleModifiedItemClick and _G.HandleModifiedItemClick(item.itemLink) then
-							-- Handled.
-						elseif _G.IsControlKeyDown() and _G.DressUpItemLink then
-							_G.DressUpItemLink(item.itemLink)
-						elseif _G.IsShiftKeyDown() then
-							local chatBox = _G.ChatFrameEditBox or (_G.ChatFrame1EditBox)
-							if chatBox and chatBox:IsShown() then
-								chatBox:Insert(item.itemLink)
-							else
-								Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
+						-- Template's OnClick already called HandleModifiedItemClick (chat links, dress-up).
+						-- Only apply manual fallbacks when that API is absent.
+						if not _G.HandleModifiedItemClick then
+							if _G.IsControlKeyDown() and _G.DressUpItemLink then
+								_G.DressUpItemLink(item.itemLink)
+							elseif _G.IsShiftKeyDown() then
+								local chatBox = _G.ChatFrameEditBox or (_G.ChatFrame1EditBox)
+								if chatBox and chatBox:IsShown() then
+									chatBox:Insert(item.itemLink)
+								else
+									Bagshui:PickupItem(item, self, itemButton, callPickupContainerItemFromBagshuiPickupItem)
+								end
 							end
 						end
 					-- else: plain left-click — template's PickupContainerItem already fired.
@@ -1239,12 +1218,13 @@ function Inventory:ItemButton_OnClick(mouseButton, isDrag)
 				_G.this = oldGlobalThis
 			end
 
-			-- Clear pending sale item (must happen before window update).
-			self:ClearItemPendingSale(nil, true)
 			-- Hide tooltip on click -- UpdateWindow() will call ItemSlotAndGroupMouseOverCheck(), which will show it again if needed.
 			self:ItemButton_OnLeave()
 			-- Something was clicked, so make sure the window is up to date.
-			self:ForceUpdateWindow()
+			-- Defer the update to break out of the secure PostClick execution context
+			-- and avoid "prevented the call of the secure function SetScale()" taint.
+			self.windowUpdateNeeded = true
+			self:QueueUpdate()
 		end
 	end
 end
@@ -1373,8 +1353,9 @@ end
 
 --- Hook for trade frame so we can add the Alt+clicked item after it opens.
 ---@param wowApiFunctionName string Hooked WoW API function that triggered this call.
-function Inventory:TradeFrame_OnShow(wowApiFunctionName)
-	self.hooks:OriginalHook(wowApiFunctionName)
+---@param arg1 any? First argument passed to the original function (the TradeFrame itself in the OnShow script context).
+function Inventory:TradeFrame_OnShow(wowApiFunctionName, arg1)
+	self.hooks:OriginalHook(wowApiFunctionName, arg1)
 	Bagshui:QueueClassCallback(self, self.TradeQueuedItem, 0.05)
 end
 

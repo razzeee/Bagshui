@@ -805,5 +805,30 @@ end
 Bagshui:InitTooltips()
 Bagshui:AddInfoTooltipHooks()
 
+-- On WotLK, ContainerFrameItemButtonTemplate has an intrinsic script that calls
+-- SetInventoryItem("player", BankButtonIDToInvSlotID(slot)) for BANK_CONTAINER items
+-- every frame (via a child frame OnUpdate or OnEnter that fires after Bagshui's handler).
+-- On this server, SetInventoryItem for bank slots produces an empty/value-only tooltip.
+-- Use hooksecurefunc (which always fires last, after all other hooks) to detect this and
+-- immediately restore the correct tooltip via SetHyperlink.
+if _G.hooksecurefunc then
+	_G.hooksecurefunc(_G.GameTooltip, "SetInventoryItem", function(tooltip, unit, slotNum)
+		-- Only act when GameTooltip is owned by a Bagshui BANK_CONTAINER item button.
+		local owner = tooltip:GetOwner()
+		if
+			owner
+			and owner.bagshuiData
+			and owner.bagshuiData.bagNum == _G.BANK_CONTAINER
+			and owner.bagshuiData.item
+			and owner.bagshuiData.item.emptySlot ~= 1
+			and owner.bagshuiData.item.itemString
+		then
+			-- The intrinsic just corrupted the tooltip. Restore it via SetHyperlink
+			-- which works correctly for bank items regardless of server quirks.
+			tooltip:SetHyperlink(owner.bagshuiData.item.itemString)
+		end
+	end)
+end
+
 
 end)

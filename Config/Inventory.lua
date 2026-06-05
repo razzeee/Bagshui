@@ -112,14 +112,15 @@ Bagshui.config.Inventory = {
 
 	[BS_INVENTORY_TYPE.BANK] = {
 
-		-- Bank (24) + (6 Purchasable Bag Slots * 20 slot bags) = 144
-		-- Some Vanilla implementations have larger bags available, but the
-		-- Inventory class will handle that automatically.
-		initialItemSlotButtons = 144,
+		-- Bank (24) + (7 Purchasable Bag Slots * 20 slot bags) = 164
+		-- Some server implementations (e.g. Ascension) have 7 bank bag slots instead
+		-- of the standard 6. Using 12 as the upper bound to handle up to 8 slots.
+		-- The Inventory class handles the actual slot count automatically.
+		initialItemSlotButtons = 184,
 
-		-- Append bags 5 through 10 to containerIds array when it is built at
-		-- the end of this file.
-		containerIdRange = { 5, 10 },
+		-- Append bags 5 through 12 to containerIds array when it is built at
+		-- the end of this file. This covers servers with up to 8 bank bag slots.
+		containerIdRange = { 5, 12 },
 		-- XML template for bag buttons.
 		bagButtonTemplate = "BankItemButtonBagTemplate",
 		-- Bank bag button IDs match their bag numbers.
@@ -127,7 +128,7 @@ Bagshui.config.Inventory = {
 		-- BankFrame code wants "Bag#" when parsing the element's name with
 		-- `strsub(<name>, 10)`.
 		bagSlotNameFormat = "BgshiBankBag%d",
-		-- Bank containers are BAG1 - BAG6 for `GetInventorySlotInfo()`.
+		-- Bank containers are BAG1 - BAG8 for `GetInventorySlotInfo()`.
 		inventorySlotFormat = "BAG%d",
 		-- Bank bag slots are Bag1 - Bag6 in `GetInventorySlotInfo()` but start
 		-- at 5 for `GetContainerNumSlots()`.
@@ -141,9 +142,10 @@ Bagshui.config.Inventory = {
 
 		getInventorySlotFunction = _G.BankButtonIDToInvSlotID,
 
-		-- Bank doesn't need a tooltipFunction because it directly calls
-		-- GameTooltip:SetInventoryItem() in its OnEnter script, so there's
-		-- nothing else addons could be hooking.
+		-- Bank does not use itemSlotTooltipFunction: ContainerFrameItemButton_OnEnter
+		-- on this server calls SetInventoryItem() for BANK_CONTAINER items, which
+		-- returns no useful data (BankButtonIDToInvSlotID is a no-op here).
+		-- LoadTooltip() using SetBagItem(-1, slotNum) is sufficient.
 
 		events = {
 			BANKFRAME_CLOSED = "Close",
