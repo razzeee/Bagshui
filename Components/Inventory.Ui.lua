@@ -865,8 +865,6 @@ function Inventory:InitUi()
 			self:ItemButton_OnUpdate(_G.arg1)
 		end,
 	})
-	-- Make the Hearthstone toolbar button compatible with our `ContainerFrameItemButton_` hackery.
-	ui:AddItemSlotButtonGetIdProxy(buttons.toolbar.hearthstone)
 
 	-- Allow picking up the Hearthstone from the button.
 	buttons.toolbar.hearthstone:RegisterForDrag("LeftButton")
@@ -894,6 +892,10 @@ function Inventory:InitUi()
 			dummyBagFrame,
 			"ContainerFrameItemButtonTemplate"
 		)
+		-- Reuse the secure overlay for ContainerFrameItemButton compatibility;
+		-- it has real GetID()/GetParent():GetID() values without proxy frames.
+		displayButton.bagshuiData.containerFrameButton = secureButton
+		secureButton.bagshuiData = displayButton.bagshuiData
 
 		-- Clear every texture so the secure button is invisible.
 		local bn = secureButton:GetName()
