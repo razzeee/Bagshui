@@ -37,14 +37,16 @@ function InventoryUi:CreateInventoryItemSlotButton(buttonNum)
 	if not inventory._itemSlotButton_ScriptWrapper_OnClick then
 		function inventory._itemSlotButton_ScriptWrapper_OnClick(btn, mouseButton)
 			mouseButton = mouseButton or _G.arg1
-			inventory:ItemButton_OnClick(mouseButton)
+			-- Pass btn explicitly so ItemButton_OnClick doesn't need to read _G.this
+			-- from inside the PostClick secure context, which causes taint on WotLK.
+			inventory:ItemButton_OnClick(mouseButton, nil, btn or _G.this)
 		end
-		function inventory._itemSlotButton_ScriptWrapper_OnDragStart()
-			inventory:ItemButton_OnClick("LeftButton", true)
+		function inventory._itemSlotButton_ScriptWrapper_OnDragStart(btn)
+			inventory:ItemButton_OnClick("LeftButton", true, btn or _G.this)
 		end
-		function inventory._itemSlotButton_ScriptWrapper_OnReceiveDrag()
+		function inventory._itemSlotButton_ScriptWrapper_OnReceiveDrag(btn)
 			if _G.CursorHasItem() then
-				inventory:ItemButton_OnClick("LeftButton", true)
+				inventory:ItemButton_OnClick("LeftButton", true, btn or _G.this)
 			end
 		end
 		function inventory._itemSlotButton_ScriptWrapper_OnUpdate(btn, elapsed)
@@ -910,8 +912,9 @@ end
 
 ---@param mouseButton string
 ---@param isDrag number|nil|boolean
-function Inventory:ItemButton_OnClick(mouseButton, isDrag)
-	local itemButton = _G.this
+---@param itemButton table? Explicit button frame; falls back to _G.this for 1.12 compatibility.
+function Inventory:ItemButton_OnClick(mouseButton, isDrag, itemButton)
+	itemButton = itemButton or _G.this
 
 	local buttonInfo = itemButton.bagshuiData
 	local item = self.inventory[buttonInfo.bagNum][buttonInfo.slotNum]

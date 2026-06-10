@@ -226,6 +226,8 @@ end
 
 
 --- Reset our cursor item tracking when the cursor is emptied.
+--- Called as a SECURE_POST hook (hooksecurefunc) after ClearCursor/DeleteCursorItem
+--- have already run. Do NOT call OriginalHook -- the original already executed.
 ---@param wowApiFunctionName string? Hooked WoW API function that triggered this call.
 function Bagshui:ClearCursor(wowApiFunctionName)
 	self.cursorItem = nil
@@ -241,7 +243,9 @@ function Bagshui:ClearCursor(wowApiFunctionName)
 	if wowApiFunctionName == "DeleteCursorItem" then
 		self.lastCursorItemUniqueId = nil
 	end
-	self.hooks:OriginalHook(wowApiFunctionName)
+	-- OriginalHook intentionally omitted: these are now SECURE_POST hooks and the
+	-- original C function (ClearCursor / DeleteCursorItem) has already run before
+	-- this post-hook was called.
 end
 
 
@@ -277,24 +281,32 @@ end
 --- 
 --- Note that since these API functions receive inventory slot IDs, not container numbers, the `Inventory.inventoryIdsToContainerIds`
 --- table must be used to translate into something that will match `Inventory.containerIds`.
+---
+--- Called as a SECURE_POST hook (hooksecurefunc): the original C function has already run
+--- when this handler is called. self.cursorBagSlotNum still holds the pre-call value because
+--- nothing else has modified it between the original running and this post-hook firing.
 ---@param wowApiFunctionName string Hooked WoW API function that triggered this call.
 ---@param invSlotId number Inventory slot ID to pick up the item from.
----@return any wowApiFunctionReturnValue Return value from hooked WoW API function.
 function Bagshui:PickupInventoryItem(wowApiFunctionName, invSlotId)
 	--self:PrintDebug("Bagshui:PickupInventoryItem() called from " .. tostring(wowApiFunctionName) .. " with invSlotId " .. tostring(invSlotId))
+
+	-- Snapshot cursorBagSlotNum before clearing it below. Because this is a SECURE_POST
+	-- hook, the original has already run, but cursorBagSlotNum still reflects the
+	-- pre-call state (it is only modified by Bagshui code, not by the C function itself).
+	local priorCursorBagSlotNum = self.cursorBagSlotNum
 
 	-- Only store bag slot information if there's currently a bag on the cursor
 	-- and the destination is different from the source.
 	if
 		_G.CursorHasItem()
 		and self.cursorItem == nil
-		and self.cursorBagSlotNum ~= nil
-		and self.cursorBagSlotNum ~= invSlotId
+		and priorCursorBagSlotNum ~= nil
+		and priorCursorBagSlotNum ~= invSlotId
 	then
-		self.pickedUpBagSlotNum = self.cursorBagSlotNum
+		self.pickedUpBagSlotNum = priorCursorBagSlotNum
 		self.putDownBagSlotNum = invSlotId
 
-	elseif self.cursorBagSlotNum == invSlotId then
+	elseif priorCursorBagSlotNum == invSlotId then
 		-- Bag was put back down in the same place.
 		self.pickedUpBagSlotNum = nil
 		self.putDownBagSlotNum = nil
@@ -303,8 +315,8 @@ function Bagshui:PickupInventoryItem(wowApiFunctionName, invSlotId)
 	-- cursorBagSlotNum will be compared with arg1 (invSlotId) of the second call to an API function to determine whether a change was made.
 	self.cursorBagSlotNum = nil
 
-	-- Let WoW handle all the actual work.
-	local ret = self.hooks:OriginalHook(wowApiFunctionName, invSlotId)
+	-- OriginalHook intentionally omitted: these are now SECURE_POST hooks and the
+	-- original C function has already run before this post-hook was called.
 
 	-- A bag was picked up.
 	if
@@ -341,9 +353,6 @@ function Bagshui:PickupInventoryItem(wowApiFunctionName, invSlotId)
 	-- so a manual check on the next frame is needed to ensure accuracy.
 	-- (Just calling it for all the hooks to be safe).
 	self:QueueClassCallback(self, self.CheckCursor)
-
-	-- Some of the API functions expect return values, so always return what we got back from the original call.
-	return ret
 end
 
 

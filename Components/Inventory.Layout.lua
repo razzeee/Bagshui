@@ -1116,15 +1116,21 @@ function Inventory:UpdateWindow()
 
 			-- Apply bag bar scaling and opacity.
 			local bagBarScale = (itemSlotSize / uiButtons.itemSlots[1].bagshuiData.originalSizeAdjusted) * BsSkin.bagBarScale
-			uiFrames.bagBar:SetScale(bagBarScale)
-			-- Invert scaling for available space display so text is the normal size.
-			uiFrames.spaceSummary:SetScale(1 / bagBarScale)
-			-- Invert scaling for borders if needed.
-			-- If bag bar scaling was reworked to scale the individual buttons, Ui:SetItemButtonSize()
-			-- could be used to handle this automatically, but that refactor is not happening now.
-			if BsSkin.itemSlotBorderInverseScale then
-				for _, bagSlotButton in ipairs(self.ui.buttons.bagSlots) do
-					bagSlotButton.bagshuiData.buttonComponents.border:SetScale(1 / bagBarScale)
+			-- SetScale on bag bar frames and their child borders is protected in combat lockdown
+			-- (child frames of ContainerFrameItemButtonTemplate/SecureActionButtonTemplate inherit
+			-- secure status). Guard the same way as Ui:SetItemButtonSize() for item slot buttons.
+			-- updateDeferredForCombat ensures a clean re-layout runs post-combat.
+			if not (_G.InCombatLockdown and _G.InCombatLockdown()) then
+				uiFrames.bagBar:SetScale(bagBarScale)
+				-- Invert scaling for available space display so text is the normal size.
+				uiFrames.spaceSummary:SetScale(1 / bagBarScale)
+				-- Invert scaling for borders if needed.
+				-- If bag bar scaling was reworked to scale the individual buttons, Ui:SetItemButtonSize()
+				-- could be used to handle this automatically, but that refactor is not happening now.
+				if BsSkin.itemSlotBorderInverseScale then
+					for _, bagSlotButton in ipairs(self.ui.buttons.bagSlots) do
+						bagSlotButton.bagshuiData.buttonComponents.border:SetScale(1 / bagBarScale)
+					end
 				end
 			end
 

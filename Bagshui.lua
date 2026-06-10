@@ -978,14 +978,13 @@ local Bagshui = {
 	-- ```
 	---@type table<string, string>
 	apiFunctionsToHook = {
-		ClearCursor = "ClearCursor",
+		-- ClearCursor, DeleteCursorItem, PickupBagFromSlot, PickupInventoryItem are
+		-- protected functions on WotLK 3.3.5. They are registered as SECURE_POST hooks
+		-- (hooksecurefunc) below in AddonLoaded() to avoid taint when calling orig().
 		CloseAllWindows = "CloseAllWindows",
-		DeleteCursorItem = "ClearCursor",
 		MoneyFrame_UpdateMoney = "MoneyFrame_UpdateMoney",
 		MoneyFrame_SetType = "MoneyFrame_SetType",
 		OpenStackSplitFrame = "OpenStackSplitFrame",
-		PickupBagFromSlot = "PickupInventoryItem",
-		PickupInventoryItem = "PickupInventoryItem",
 		UIDropDownMenu_AddButton = "UIDropDownMenu_AddButton",
 	},
 
@@ -1152,6 +1151,19 @@ function Bagshui:AddonLoaded()
 	-- UIDropDownMenuDelegate:SetAttribute("createframes") from firing in a secure context,
 	-- so DropDownList1Button<N> frames are never created, breaking all addons' dropdowns.
 	self.hooks:SetHooks({ ToggleDropDownMenu = "ToggleDropDownMenu" }, BS_HOOK_ACTION.SECURE_POST, self)
+
+	-- ClearCursor, DeleteCursorItem, PickupBagFromSlot, and PickupInventoryItem are
+	-- protected functions on WotLK 3.3.5. Using REGISTER (global replacement) for them
+	-- creates a tainted Lua wrapper; when orig() is then called inside that wrapper it
+	-- fails with "tainted the call of the secure function 'orig()'". Using hooksecurefunc
+	-- instead lets WoW run the original protected function first in a secure context, and
+	-- Bagshui's tracking handler runs after as a post-hook.
+	self.hooks:SetHooks({
+		ClearCursor = "ClearCursor",
+		DeleteCursorItem = "ClearCursor",
+		PickupBagFromSlot = "PickupInventoryItem",
+		PickupInventoryItem = "PickupInventoryItem",
+	}, BS_HOOK_ACTION.SECURE_POST, self)
 
 	-- Shared menu hosting frame. Created here (on ADDON_LOADED) rather than in
 	-- Init() so that FrameXML is fully initialized first. UIDropDownMenuTemplate's
