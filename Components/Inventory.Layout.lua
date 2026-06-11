@@ -1205,13 +1205,11 @@ function Inventory:UpdateWindow()
 
 		else
 			-- Set scale and anchor for non-docked frame.
-			-- Guard against redundant SetScale calls -- on WotLK, SetScale can cause
-			-- sub-pixel layout recalculation even when the value hasn't changed.
+			-- Defer SetScale to break out of secure click/menu contexts that can taint
+			-- protected frame methods on WotLK/Ascension.
 			if self.uiFrame:GetScale() ~= self.settings.windowScale then
-				-- SetScale resets the internal anchor to TOPLEFT on WotLK, so mark
-				-- anchorDirty so FixWindowPosition re-applies the saved anchor below.
-				self.anchorDirty = true
-				self.uiFrame:SetScale(self.settings.windowScale)
+				self._pendingWindowScale = self.settings.windowScale
+				Bagshui:QueueClassCallback(self, self.ApplyWindowScale)
 			end
 			-- Re-apply saved anchor only when dirty (after SetScale or drag).
 			-- Pass true to skip RescueWindow: the frame is mid-layout and GetLeft()/GetRight()
@@ -1225,6 +1223,29 @@ function Inventory:UpdateWindow()
 	-- Reset statuses.
 	self.lastExpandEmptySlotStacks = self.expandEmptySlotStacks
 	self.windowUpdateNeeded = false
+end
+
+
+
+--- Apply queued inventory window scale changes outside secure click/menu paths.
+function Inventory:ApplyWindowScale()
+	local windowScale = self._pendingWindowScale
+	self._pendingWindowScale = nil
+
+	if not (self.uiFrame and windowScale) then
+		return
+	end
+
+	-- Guard against redundant SetScale calls -- on WotLK, SetScale can cause
+	-- sub-pixel layout recalculation even when the value hasn't changed.
+	if self.uiFrame:GetScale() ~= windowScale then
+		-- SetScale resets the internal anchor to TOPLEFT on WotLK, so mark
+		-- anchorDirty so FixWindowPosition re-applies the saved anchor below.
+		self.anchorDirty = true
+		self.uiFrame:SetScale(windowScale)
+		self:FixWindowPosition(true)
+		self:FixSettingsMenuPosition()
+	end
 end
 
 

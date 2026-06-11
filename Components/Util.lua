@@ -597,12 +597,13 @@ end
 function Util.NewClass(...)
 	local newClass = {}
 	local metatable = {}
+	local parents = { ... }
 
 	-- newClass will search for each property it doesn't have in
-	-- its superclasses (arg is the list of superclasses).
+	-- its superclasses.
 	setmetatable(metatable, {
 		__index = function(_, prop)
-			return Util.FindSuperclassProperty(prop, arg)
+			return Util.FindSuperclassProperty(prop, parents)
 		end
 	})
 	metatable.__index = metatable
@@ -620,8 +621,11 @@ end
 ---@param parents table[]
 ---@return any?
 function Util.FindSuperclassProperty(prop, parents)
+	if type(parents) ~= "table" then
+		return nil
+	end
 	for i = 1, table.getn(parents) do
-		local value = parents[i][prop]
+		local value = parents[i] and parents[i][prop]
 		if value then
 			return value
 		end

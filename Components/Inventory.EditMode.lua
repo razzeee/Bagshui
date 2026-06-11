@@ -507,11 +507,15 @@ function Inventory:RenameGroup(groupId, groupIsNew)
 			end,
 
 			--- Okay was clicked, so change the group name.
-			---@param data table Reference to `self.renameGroup_Data`, passed through via the dialog's `data` property.
-			OnAccept = function(data)
+			---@param dialog table StaticPopup frame carrying `self.renameGroup_Data` in its `data` property.
+			OnAccept = function(dialog)
+				local data = dialog and dialog.data
+				if not data then
+					return
+				end
 				self.editModeGroupHighlight = nil
 				if self.groups[data.groupId] then
-					self.groups[data.groupId].name = _G[_G.this:GetParent():GetName() .. "EditBox"]:GetText()
+					self.groups[data.groupId].name = _G[dialog:GetName() .. "EditBox"]:GetText()
 				end
 				self:ManagePendingGroupAssignments(data.groupId, true)
 				self:EditModeWindowUpdate()
@@ -520,8 +524,12 @@ function Inventory:RenameGroup(groupId, groupIsNew)
 			--- Cancel was clicked.
 			--- For new groups, this means the group is no longer wanted.
 			--- For existing groups, just remove highlighting.
-			---@param data table Reference to `self.renameGroup_Data`, passed through via the dialog's `data` property.
-			OnCancel = function(data)
+			---@param dialog table StaticPopup frame carrying `self.renameGroup_Data` in its `data` property.
+			OnCancel = function(dialog)
+				local data = dialog and dialog.data
+				if not data then
+					return
+				end
 				if data.groupIsNew then
 					local row, column = self:GroupIdToRowColumn(data.groupId)
 					if row and column then
@@ -602,8 +610,12 @@ function Inventory:DeleteGroup(groupId)
 			hideOnEscape = true,
 
 			-- Delete the group.
-			-- The groupId parameter comes from the dialog's data property which is set below.
-			OnAccept = function(groupId)
+			-- The groupId comes from the dialog's data property which is set below.
+			OnAccept = function(dialog)
+				local groupId = dialog and dialog.data
+				if not groupId then
+					return
+				end
 				local row, column = self:GroupIdToRowColumn(groupId)
 				self.editModeGroupHighlight = nil
 				self:RemoveGroupFromLayout(row, column)

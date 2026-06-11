@@ -686,8 +686,12 @@ function ObjectManager:DeleteAfterConfirmation()
 			whileDead = true,
 			hideOnEscape = true,
 			--- Perform deletion (no need for OnCancel as that simply needs to do nothing).
-			---@param data table Reference to `self.deleteAfterConfirmation_Data`, passed through via the dialog's `data` property.
-			OnAccept = function(data)
+			---@param dialog table StaticPopup frame carrying `self.deleteAfterConfirmation_Data` in its `data` property.
+			OnAccept = function(dialog)
+				local data = dialog and dialog.data
+				if not data then
+					return
+				end
 				for objectId, _ in pairs(data.selectedObjects) do
 					-- Final safety check.
 					if not  (
@@ -1490,8 +1494,12 @@ function ObjectEditor:PromptForSave()
 			hideOnEscape = true,
 			notClosableByLogout = true,
 			-- Abandon changes to the object (no need for OnCancel as that simply needs to do nothing).
-			-- The editor parameter comes from the dialog's data property which is set below.
-			OnAccept = function(editor)
+			-- The editor comes from the dialog's data property which is set below.
+			OnAccept = function(dialog)
+				local editor = dialog and dialog.data
+				if not (editor and editor.uiFrame) then
+					return
+				end
 				editor.uiFrame.bagshuiData.dirty = false
 				editor.uiFrame:Hide()
 			end,

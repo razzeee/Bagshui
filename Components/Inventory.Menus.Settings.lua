@@ -23,7 +23,7 @@ function Inventory:OpenSettingsMenu(menu)
 
 	-- This is where the menu should anchor, in theory. See comments on
 	-- Inventory:FixSettingsMenuPosition() for more.
-	self.lastSettingsAnchor = self.settings.windowAnchorYPoint .. self.settings.windowAnchorXPoint
+	self.lastSettingsAnchor = "TOP" .. self.settings.windowAnchorXPoint
 	self.lastSettingsXOffset = BsSkin.menuShiftRight * (self.settings.windowAnchorXPoint == "LEFT" and 1 or -1)
 
 	-- Special property 
@@ -34,9 +34,7 @@ function Inventory:OpenSettingsMenu(menu)
 		"Settings",
 		self.uiFrame,
 		self.lastSettingsXOffset,
-		0,
-		self.lastSettingsAnchor,
-		BsUtil.FlipAnchorPointComponent(self.lastSettingsAnchor, 2)
+		0
 	)
 
 	-- Anchor the menu to the side of the main window.

@@ -31,8 +31,12 @@ function Profiles:InitUi()
 				whileDead = true,
 				hideOnEscape = true,
 				--- Perform replacement (no need for OnCancel as that simply needs to do nothing).
-				---@param data table Reference to `self.replaceAfterConfirmation_Data`, passed through via the dialog's `data` property.
-				OnAccept = function(data)
+				---@param dialog table StaticPopup frame carrying `self.replaceAfterConfirmation_Data` in its `data` property.
+				OnAccept = function(dialog)
+					local data = dialog and dialog.data
+					if not data then
+						return
+					end
 					self:Copy(data.source, data.target, data.profileTypeStorageKey)
 				end,
 			}

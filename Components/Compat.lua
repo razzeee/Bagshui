@@ -206,15 +206,23 @@ function Bagshui:CheckOtherAddonSetting(
 				cancels = dialogName,
 
 				--- Disable was clicked, so do it.
-				---@param data table Reference to `self.renameGroup_Data`, passed through via the dialog's `data` property.
-				OnAccept = function(data)
+				---@param dialog table StaticPopup frame carrying prompt data in its `data` property.
+				OnAccept = function(dialog)
+					local data = dialog and dialog.data
+					if not data then
+						return
+					end
 					data.disableFunc(data)
 				end,
 
 				--- Ignore was clicked.
-				---@param data table Reference to `self.renameGroup_Data`, passed through via the dialog's `data` property.
-				OnCancel = function(data, reason)
+				---@param dialog table StaticPopup frame carrying prompt data in its `data` property.
+				OnCancel = function(dialog, _, reason)
+					local data = dialog and dialog.data
 					if reason == "override" then
+						return
+					end
+					if not data then
 						return
 					end
 					data.ignoreFunc(data)
